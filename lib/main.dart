@@ -67,7 +67,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final String adminPinCode = "1234"; // Mã PIN Admin
+  final String adminPinCode = "1234";
   bool isAdminMode = false;
   bool isLoadingMenu = true;
 
@@ -80,7 +80,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadMenuFromServer();
   }
 
-  // Lấy thực đơn từ Server
   Future<void> _loadMenuFromServer() async {
     setState(() => isLoadingMenu = true);
     final data = await ApiService.fetchMenu();
@@ -88,7 +87,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (data.isNotEmpty) {
         menuList = List<Map<String, dynamic>>.from(data);
       } else {
-        // Menu mặc định nếu Server chưa có dữ liệu
         menuList = [
           {'id': '1', 'name': 'Cháo lòng', 'price': 25000.0},
           {'id': '2', 'name': 'Cháo gà', 'price': 25000.0},
@@ -103,7 +101,6 @@ class _HomeScreenState extends State<HomeScreen> {
   double get totalAmount => currentOrder.fold(
       0, (sum, item) => sum + (item['price'] * item['qty']));
 
-  // Thêm món mới vào Thực đơn (Dành cho Admin)
   void _showAddMenuItemDialog() {
     final nameController = TextEditingController();
     final priceController = TextEditingController();
@@ -154,7 +151,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Chọn món & điều chỉnh giá/ghi chú cho đơn hàng
   void _showAddDishDialog(String name, double defaultPrice) {
     final priceController =
         TextEditingController(text: defaultPrice.toStringAsFixed(0));
@@ -210,7 +206,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Xác thực PIN mở/tắt chế độ Admin
   void _showAdminAuthDialog() {
     final pinController = TextEditingController();
     showDialog(
@@ -257,7 +252,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Xem Hóa đơn trước khi lưu
   void _showReceiptDialog() {
     showDialog(
       context: context,
@@ -267,7 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
           width: double.maxFinite,
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Thời gian: ${DateTime.now().toString().substring(0, 16)}'),
               const Divider(),
@@ -607,3 +601,4 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 }
+
