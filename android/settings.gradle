@@ -10,6 +10,9 @@ if (localPropertiesFile.exists()) {
 }
 
 def flutterSdkPath = properties.getProperty("flutter.sdk")
-assert flutterSdkPath != null, "flutter.sdk không tìm thấy"
-apply from: "$flutterSdkPath/packages/flutter_tools/gradle/app_plugin_loader.gradle"
-
+if (flutterSdkPath == null) {
+    flutterSdkPath = System.getenv('FLUTTER_ROOT')
+}
+if (flutterSdkPath != null) {
+    apply from: "$flutterSdkPath/packages/flutter_tools/gradle/app_plugin_loader.gradle"
+}
