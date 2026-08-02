@@ -1,0 +1,13 @@
+name: app_tinh_tien
+description: Ung dung tinh tien
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  image_picker: ^1.1.2
+
+flutter:
+  uses-material-design: true
