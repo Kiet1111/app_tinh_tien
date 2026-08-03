@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "762842766866",
+    "project_id": "app-tinh-tien-65657",
+    "storage_bucket": "app-tinh-tien-65657.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:762842766866:android:a6f619e711641c61b882cb",
+        "android_client_info": {
+          "package_name": "com.example.app_tinh_tien"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDOD0ChXgfnUmFcFWG4IoYA7NL-pVGd5pY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
