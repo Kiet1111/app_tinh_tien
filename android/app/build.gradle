@@ -6,6 +6,17 @@ plugins {
 
 android {
     namespace "com.example.app_tinh_tien"
+    compileSdk 36   // 👈 Đổi giá trị này thành 36 (hoặc compileSdkVersion 36)
+
+    defaultConfig {
+        applicationId "com.example.app_tinh_tien"
+        minSdk 21     // (hoặc minSdkVersion flutter.minSdkVersion)
+        targetSdk 36  // 👈 Đổi giá trị này thành 36 (hoặc targetSdkVersion 36)
+        ...
+    }
+}
+
+    namespace "com.example.app_tinh_tien"
     compileSdkVersion 34
 
     compileOptions {
