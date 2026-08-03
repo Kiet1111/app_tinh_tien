@@ -1,33 +1,67 @@
 plugins {
     id "com.android.application"
     id "kotlin-android"
+    // Flutter Gradle Plugin
     id "dev.flutter.flutter-gradle-plugin"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.reader('UTF-8').withReader { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
+
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
 }
 
 android {
     namespace "com.example.app_tinh_tien"
-    compileSdk 36
+    compileSdk flutter.compileSdkVersion
+    ndkVersion flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     kotlinOptions {
-        jvmTarget = '17'
+        jvmTarget = '1.8'
     }
 
     defaultConfig {
+        // Thay đổi ID ứng dụng của bạn nếu có
         applicationId "com.example.app_tinh_tien"
-        minSdk 21
-        targetSdk 36
-        versionCode 1
-        versionName "1.0"
+        
+        // ========================================================
+        // 1. CẬP NHẬT minSdkVersion TẠI ĐÂY (Sửa thành 21 hoặc 23)
+        // ========================================================
+        minSdkVersion 21
+        
+        targetSdkVersion flutter.targetSdkVersion
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+
+        // ========================================================
+        // 2. BẬT MULTIDEX ĐỂ TRÁNH LỖI KHI DÙNG FIREBASE
+        // ========================================================
+        multiDexEnabled true
     }
 
     buildTypes {
         release {
+            // Cấu hình chữ ký debug cho bản release (hoặc cấu hình keystore của bạn)
             signingConfig signingConfigs.debug
+            minifyEnabled false
+            shrinkResources false
         }
     }
 }
@@ -35,4 +69,8 @@ android {
 flutter {
     source '../..'
 }
-apply plugin: 'com.google.gms.google-services'
+
+dependencies {
+    // Thư viện hỗ trợ MultiDex cho Android
+    implementation 'androidx.multidex:multidex:2.0.1'
+}
