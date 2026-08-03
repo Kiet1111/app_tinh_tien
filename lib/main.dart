@@ -470,7 +470,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   ),
                 ),
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Tên món chính')),
-                TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá mặc định')),
+                TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá mặc định (VNĐ)')),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   value: categories.contains(cat) ? cat : (categories.length > 1 ? categories[1] : categories.first),
@@ -498,7 +498,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       children: [
                         Expanded(child: TextFormField(initialValue: varItem.name, decoration: const InputDecoration(hintText: 'Tên biến thể'), onChanged: (v) => varItem.name = v)),
                         const SizedBox(width: 5),
-                        Expanded(child: TextFormField(initialValue: varItem.price.toStringAsFixed(0), keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'Giá'), onChanged: (v) => varItem.price = double.tryParse(v) ?? 0)),
+                        Expanded(child: TextFormField(initialValue: varItem.price.toStringAsFixed(0), keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'Giá VNĐ'), onChanged: (v) => varItem.price = double.tryParse(v) ?? 0)),
                         IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => setDlgState(() => currentVariants.remove(varItem)))
                       ],
                     )),
@@ -514,7 +514,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       children: [
                         Expanded(child: TextFormField(initialValue: topItem.name, decoration: const InputDecoration(hintText: 'Tên đồ thêm'), onChanged: (v) => topItem.name = v)),
                         const SizedBox(width: 5),
-                        Expanded(child: TextFormField(initialValue: topItem.price.toStringAsFixed(0), keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'Giá thêm'), onChanged: (v) => topItem.price = double.tryParse(v) ?? 0)),
+                        Expanded(child: TextFormField(initialValue: topItem.price.toStringAsFixed(0), keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'Giá thêm VNĐ'), onChanged: (v) => topItem.price = double.tryParse(v) ?? 0)),
                         IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => setDlgState(() => currentToppings.remove(topItem)))
                       ],
                     )),
@@ -686,7 +686,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   _syncTableToCloud(tables[selectedTableIndex]);
                   Navigator.pop(ctx);
                 },
-                child: Text('Thêm • ${finalTotalPrice.toStringAsFixed(0)}đ'),
+                child: Text('Thêm • ${finalTotalPrice.toStringAsFixed(0)} VNĐ'),
               )
             ],
           );
@@ -715,7 +715,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     table.items.clear();
     await _syncTableToCloud(table);
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Thanh toán thành công ${total.toStringAsFixed(0)}đ')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Thanh toán thành công ${total.toStringAsFixed(0)} VNĐ')));
   }
 
   @override
@@ -825,7 +825,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             : const Icon(Icons.fastfood, size: 40, color: Colors.teal),
                       ),
                       Text(item.name, style: TextStyle(fontWeight: FontWeight.bold, decoration: item.isAvailable ? null : TextDecoration.lineThrough)),
-                      Text('${item.basePrice.toStringAsFixed(0)}đ/${item.unit}', style: const TextStyle(color: Colors.teal, fontSize: 12)),
+                      Text('${item.basePrice.toStringAsFixed(0)} VNĐ/${item.unit}', style: const TextStyle(color: Colors.teal, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -867,7 +867,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text('${(order['totalPrice'] as double).toStringAsFixed(0)}đ', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text('${(order['totalPrice'] as double).toStringAsFixed(0)} VNĐ', style: const TextStyle(fontWeight: FontWeight.bold)),
                             IconButton(
                               icon: const Icon(Icons.remove_circle, color: Colors.red, size: 18),
                               onPressed: () {
@@ -936,7 +936,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 final item = menuItems[i];
                 return ListTile(
                   title: Text(item.name),
-                  subtitle: Text('Loại: ${item.category} | Giá: ${item.basePrice.toStringAsFixed(0)}đ / ${item.unit}\nBiến thể: ${item.variants.length} | Topping: ${item.toppings.length}'),
+                  subtitle: Text('Loại: ${item.category} | Giá: ${item.basePrice.toStringAsFixed(0)} VNĐ / ${item.unit}\nBiến thể: ${item.variants.length} | Topping: ${item.toppings.length}'),
                   isThreeLine: true,
                   trailing: currentRole == 'Admin'
                       ? Row(
@@ -969,7 +969,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         itemBuilder: (c, i) => ListTile(
           title: Text("Đơn #${orderHistory[i]['id']} - ${orderHistory[i]['table']}"),
           subtitle: Text(orderHistory[i]['time'] ?? ''),
-          trailing: Text('${(orderHistory[i]['total'] as num? ?? 0).toStringAsFixed(0)}đ', style: const TextStyle(fontWeight: FontWeight.bold)),
+          trailing: Text('${(orderHistory[i]['total'] as num? ?? 0).toStringAsFixed(0)} VNĐ', style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
       ),
     );
