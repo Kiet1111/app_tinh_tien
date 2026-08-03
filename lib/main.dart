@@ -1,3 +1,5 @@
+// lib/main.dart
+
 import 'package:flutter/material.dart';
 import 'services/api_service.dart';
 
@@ -82,18 +84,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadMenuFromServer() async {
     setState(() => isLoadingMenu = true);
+    // Gọi ApiService giả lập cục bộ (nó luôn thành công và trả về danh sách được cập nhật)
     final data = await ApiService.fetchMenu();
     setState(() {
-      if (data.isNotEmpty) {
-        menuList = List<Map<String, dynamic>>.from(data);
-      } else {
-        menuList = [
-          {'id': '1', 'name': 'Cháo lòng', 'price': 25000.0},
-          {'id': '2', 'name': 'Cháo gà', 'price': 25000.0},
-          {'id': '3', 'name': 'Hủ tiếu', 'price': 30000.0},
-          {'id': '4', 'name': 'Cà phê sữa', 'price': 15000.0},
-        ];
-      }
+      menuList = List<Map<String, dynamic>>.from(data);
       isLoadingMenu = false;
     });
   }
@@ -140,11 +134,12 @@ class _HomeScreenState extends State<HomeScreen> {
               double price = double.tryParse(priceController.text) ?? 0;
               if (name.isNotEmpty && price > 0) {
                 Navigator.pop(ctx);
+                // Gọi ApiService giả lập để thêm món cục bộ
                 bool success = await ApiService.addMenuItem(name, price);
-                if (success) _loadMenuFromServer();
+                if (success) _loadMenuFromServer(); // Tải lại menu để cập nhật giao diện ngay lập tức
               }
             },
-            child: const Text('Lưu vào Server'),
+            child: const Text('Lưu vào Menu'), // Sửa nhãn nút
           ),
         ],
       ),
@@ -302,7 +297,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _submitOrder();
             },
             icon: const Icon(Icons.check),
-            label: const Text('XÁC NHẬN & LƯU SERVER'),
+            label: const Text('XÁC NHẬN & THANH TOÁN'), // Sửa nhãn nút
           )
         ],
       ),
@@ -318,13 +313,14 @@ class _HomeScreenState extends State<HomeScreen> {
       'items': currentOrder,
     };
 
+    // Gọi ApiService giả lập để lưu đơn hàng cục bộ (sẽ luôn thành công)
     bool isSaved = await ApiService.saveOrder(orderData);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isSaved
               ? 'Thanh toán & Lưu đơn thành công!'
-              : 'Lỗi gửi Server!'),
+              : 'Lỗi gửi Server!'), // Trong mô phỏng cục bộ sẽ luôn thành công
           backgroundColor: isSaved ? Colors.green : Colors.red,
         ),
       );
@@ -408,10 +404,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                     icon: const Icon(Icons.remove_circle,
                                         color: Colors.red, size: 20),
                                     onPressed: () async {
+                                      // Gọi ApiService giả lập để xóa món cục bộ
                                       await ApiService.deleteMenuItem(
                                           dish['id'].toString());
-                                      _loadMenuFromServer();
+                                      _loadMenuFromServer(); // Tải lại menu để cập nhật giao diện ngay lập tức
                                     },
+                                    tooltip: 'Xóa món ăn khỏi Menu', // Thêm chú thích tool tip
                                   ),
                                 )
                             ],
@@ -541,6 +539,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   decoration: BoxDecoration(
                     color: Colors.teal.shade100,
                     borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.3),
+                        spreadRadius: 2,
+                        blurRadius: 5,
+                        offset: const Offset(0, 3), // Thay đổi hướng bóng đổ
+                      ),
+                    ],
                   ),
                   child: Column(
                     children: [
@@ -555,7 +561,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             fontWeight: FontWeight.bold,
                             color: Colors.teal),
                       ),
-                      Text('Tổng số đơn đã lưu: ${orders.length}'),
+                      Text('Tổng số đơn đã lưu: ${orders.length}'), // Sẽ luôn bằng 0 vì chúng ta không thực sự lưu đơn hàng
                     ],
                   ),
                 ),
