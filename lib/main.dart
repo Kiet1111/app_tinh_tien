@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'services/api_service.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
@@ -36,6 +37,7 @@ class _MainTabScreenState extends State<MainTabScreen> {
   final List<Widget> _screens = [
     const HomeScreen(),
     const ReportsScreen(),
+    const LogsScreen(),
   ];
 
   @override
@@ -53,6 +55,10 @@ class _MainTabScreenState extends State<MainTabScreen> {
           NavigationDestination(
             icon: Icon(Icons.bar_chart),
             label: 'Báo Cáo',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history_edu),
+            label: 'Nhật Ký Máy',
           ),
         ],
       ),
@@ -79,13 +85,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadMenuFromServer();
+    _loadMenuFromStorage();
   }
 
-  Future<void> _loadMenuFromServer() async {
+  Future<void> _loadMenuFromStorage() async {
     setState(() => isLoadingMenu = true);
-    // Gọi ApiService giả lập cục bộ (nó luôn thành công và trả về danh sách được cập nhật)
-    final data = await ApiService.fetchMenu();
+    final data = await LocalStorageService.fetchMenu();
     setState(() {
       menuList = List<Map<String, dynamic>>.from(data);
       isLoadingMenu = false;
@@ -134,12 +139,18 @@ class _HomeScreenState extends State<HomeScreen> {
               double price = double.tryParse(priceController.text) ?? 0;
               if (name.isNotEmpty && price > 0) {
                 Navigator.pop(ctx);
-                // Gọi ApiService giả lập để thêm món cục bộ
-                bool success = await ApiService.addMenuItem(name, price);
-                if (success) _loadMenuFromServer(); // Tải lại menu để cập nhật giao diện ngay lập tức
+                bool success = await LocalStorageService.addMenuItem(name, price);
+                if (success) {
+                  _loadMenuFromStorage();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Đã lưu món mới vào bộ nhớ điện thoại!')),
+                    );
+                  }
+                }
               }
             },
-            child: const Text('Lưu vào Menu'), // Sửa nhãn nút
+            child: const Text('Lưu vào Menu'),
           ),
         ],
       ),
@@ -220,24 +231,36 @@ class _HomeScreenState extends State<HomeScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               if (pinController.text == adminPinCode) {
-                setState(() => isAdminMode = !isAdminMode);
+                bool newAdminState = !isAdminMode;
+                setState(() => isAdminMode = newAdminState);
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(isAdminMode
-                        ? 'Đã bật chế độ Admin (Chỉnh sửa Menu)'
-                        : 'Đã tắt chế độ Admin'),
-                  ),
+                
+                await LocalStorageService.addLog(
+                  'ADMIN_LOGIN', 
+                  newAdminState ? 'Admin đăng nhập thành công' : 'Admin đăng xuất'
                 );
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(isAdminMode
+                          ? 'Đã bật chế độ Admin (Chỉnh sửa Menu / Quản lý)'
+                          : 'Đã tắt chế độ Admin'),
+                    ),
+                  );
+                }
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Mã PIN không đúng!'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                await LocalStorageService.addLog('ADMIN_LOGIN_FAIL', 'Cảnh báo: Nhập sai mã PIN Admin');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Mã PIN không đúng!'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
             child: Text(isAdminMode ? 'Tắt Admin' : 'Mở khóa'),
@@ -297,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _submitOrder();
             },
             icon: const Icon(Icons.check),
-            label: const Text('XÁC NHẬN & THANH TOÁN'), // Sửa nhãn nút
+            label: const Text('XÁC NHẬN & THANH TOÁN'),
           )
         ],
       ),
@@ -308,19 +331,18 @@ class _HomeScreenState extends State<HomeScreen> {
     if (currentOrder.isEmpty) return;
 
     final orderData = {
-      'timestamp': DateTime.now().toIso8601String(),
+      'timestamp': DateTime.now().toString().substring(0, 19),
       'total': totalAmount,
-      'items': currentOrder,
+      'items': List<Map<String, dynamic>>.from(currentOrder),
     };
 
-    // Gọi ApiService giả lập để lưu đơn hàng cục bộ (sẽ luôn thành công)
-    bool isSaved = await ApiService.saveOrder(orderData);
+    bool isSaved = await LocalStorageService.saveOrder(orderData);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(isSaved
-              ? 'Thanh toán & Lưu đơn thành công!'
-              : 'Lỗi gửi Server!'), // Trong mô phỏng cục bộ sẽ luôn thành công
+              ? 'Thanh toán & Đã lưu vào bộ nhớ máy thành công!'
+              : 'Lỗi lưu dữ liệu!'),
           backgroundColor: isSaved ? Colors.green : Colors.red,
         ),
       );
@@ -342,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadMenuFromServer,
+            onPressed: _loadMenuFromStorage,
           ),
           if (isAdminMode)
             IconButton(
@@ -404,12 +426,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                     icon: const Icon(Icons.remove_circle,
                                         color: Colors.red, size: 20),
                                     onPressed: () async {
-                                      // Gọi ApiService giả lập để xóa món cục bộ
-                                      await ApiService.deleteMenuItem(
+                                      await LocalStorageService.deleteMenuItem(
                                           dish['id'].toString());
-                                      _loadMenuFromServer(); // Tải lại menu để cập nhật giao diện ngay lập tức
+                                      _loadMenuFromStorage();
                                     },
-                                    tooltip: 'Xóa món ăn khỏi Menu', // Thêm chú thích tool tip
+                                    tooltip: 'Xóa món ăn khỏi Menu',
                                   ),
                                 )
                             ],
@@ -493,7 +514,7 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> {
-  List<dynamic> orders = [];
+  List<Map<String, dynamic>> orders = [];
   bool isLoading = true;
 
   @override
@@ -504,9 +525,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Future<void> _loadReports() async {
     setState(() => isLoading = true);
-    final data = await ApiService.fetchOrders();
+    final data = await LocalStorageService.fetchOrders();
     setState(() {
-      orders = data;
+      orders = List<Map<String, dynamic>>.from(data);
       isLoading = false;
     });
   }
@@ -520,7 +541,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Báo Cáo Doanh Thu'),
+        title: const Text('Báo Cáo Doanh Thu (Bộ Nhớ Máy)'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -544,13 +565,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         color: Colors.grey.withOpacity(0.3),
                         spreadRadius: 2,
                         blurRadius: 5,
-                        offset: const Offset(0, 3), // Thay đổi hướng bóng đổ
+                        offset: const Offset(0, 3),
                       ),
                     ],
                   ),
                   child: Column(
                     children: [
-                      const Text('TỔNG DOANH THU SERVER',
+                      const Text('TỔNG DOANH THU TRÊN ĐIỆN THOẠI',
                           style: TextStyle(
                               fontSize: 14, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
@@ -561,7 +582,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             fontWeight: FontWeight.bold,
                             color: Colors.teal),
                       ),
-                      Text('Tổng số đơn đã lưu: ${orders.length}'), // Sẽ luôn bằng 0 vì chúng ta không thực sự lưu đơn hàng
+                      const SizedBox(height: 4),
+                      Text('Tổng số đơn đã lưu: ${orders.length}'),
                     ],
                   ),
                 ),
@@ -569,14 +591,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text('Lịch sử đơn hàng mới nhất',
+                    child: Text('Lịch sử đơn hàng đã lưu',
                         style: TextStyle(
                             fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
                 Expanded(
                   child: orders.isEmpty
-                      ? const Center(child: Text('Chưa có đơn hàng nào trên Server!'))
+                      ? const Center(child: Text('Chưa có đơn hàng nào được lưu trong máy!'))
                       : ListView.builder(
                           itemCount: orders.length,
                           itemBuilder: (ctx, index) {
@@ -590,7 +612,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 title: Text(
                                     'Đơn hàng #${order['id'] ?? (orders.length - index)}'),
                                 subtitle: Text(
-                                    'Thời gian: ${order['timestamp']?.toString().substring(0, 10) ?? ''}'),
+                                    'Thời gian: ${order['timestamp'] ?? ''}'),
                                 trailing: Text(
                                   '${(double.tryParse(order['total'].toString()) ?? 0).toStringAsFixed(0)}đ',
                                   style: const TextStyle(
@@ -608,3 +630,76 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 }
 
+// ------------------- MÀN HÌNH NHẬT KÝ THAO TÁC HỆ THỐNG -------------------
+class LogsScreen extends StatefulWidget {
+  const LogsScreen({super.key});
+
+  @override
+  State<LogsScreen> createState() => _LogsScreenState();
+}
+
+class _LogsScreenState extends State<LogsScreen> {
+  List<Map<String, dynamic>> logs = [];
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLogs();
+  }
+
+  Future<void> _loadLogs() async {
+    setState(() => isLoading = true);
+    final data = await LocalStorageService.fetchLogs();
+    setState(() {
+      logs = List<Map<String, dynamic>>.from(data);
+      isLoading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nhật Ký Thao Tác Máy'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadLogs,
+          ),
+        ],
+      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : logs.isEmpty
+              ? const Center(child: Text('Chưa có ghi nhận thao tác nào.'))
+              : ListView.builder(
+                  itemCount: logs.length,
+                  itemBuilder: (ctx, index) {
+                    final log = logs[logs.length - 1 - index];
+                    String type = log['type'] ?? '';
+                    IconData iconData = Icons.info_outline;
+                    Color iconColor = Colors.blue;
+
+                    if (type.contains('ADMIN')) {
+                      iconData = Icons.admin_panel_settings;
+                      iconColor = Colors.orange;
+                    } else if (type.contains('ORDER')) {
+                      iconData = Icons.add_shopping_cart;
+                      iconColor = Colors.green;
+                    }
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 4),
+                      child: ListTile(
+                        leading: Icon(iconData, color: iconColor),
+                        title: Text(log['detail'] ?? ''),
+                        subtitle: Text('Thời gian: ${log['time'] ?? ''}'),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+}
