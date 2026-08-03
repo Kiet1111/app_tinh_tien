@@ -2,7 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="App Tinh Tien"
-        android:icon="@android:drawable/sym_def_app_icon">
+        android:icon="@mipmap/ic_launcher"
+
 
         <meta-data
             android:name="flutterEmbedding"
