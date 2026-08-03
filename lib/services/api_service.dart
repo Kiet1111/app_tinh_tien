@@ -11,17 +11,55 @@ class LocalStorageService {
 
   static final _uuid = const Uuid();
 
-  // Danh sách menu mặc định ban đầu (khi mới cài app lần đầu)
+  // Menu mặc định có chứa Danh mục (category) và Biến thể món (variants)
   static final List<Map<String, dynamic>> _defaultMenu = [
-    {'id': '1', 'name': 'Cháo lòng', 'price': 25000.0},
-    {'id': '2', 'name': 'Cháo gà', 'price': 25000.0},
-    {'id': '3', 'name': 'Hủ tiếu', 'price': 30000.0},
-    {'id': '4', 'name': 'Cà phê sữa', 'price': 15000.0},
+    {
+      'id': '1',
+      'name': 'Cháo',
+      'category': 'Món ăn',
+      'price': 10000.0,
+      'variants': [
+        {'name': 'Cháo 10.000đ', 'price': 10000.0},
+        {'name': 'Cháo 20.000đ', 'price': 20000.0},
+        {'name': 'Cháo xương', 'price': 35000.0},
+      ]
+    },
+    {
+      'id': '2',
+      'name': 'Nước ngọt',
+      'category': 'Nước uống',
+      'price': 15000.0,
+      'variants': [
+        {'name': 'Coca Cola', 'price': 15000.0},
+        {'name': 'Pepsi', 'price': 15000.0},
+        {'name': 'Sting đỏ', 'price': 15000.0},
+        {'name': '7Up', 'price': 15000.0},
+      ]
+    },
+    {
+      'id': '3',
+      'name': 'Hủ tiếu',
+      'category': 'Món ăn',
+      'price': 30000.0,
+      'variants': [
+        {'name': 'Tô Thường', 'price': 30000.0},
+        {'name': 'Tô Đặc Biệt', 'price': 40000.0},
+      ]
+    },
+    {
+      'id': '4',
+      'name': 'Cà phê',
+      'category': 'Nước uống',
+      'price': 15000.0,
+      'variants': [
+        {'name': 'Cà phê đen', 'price': 15000.0},
+        {'name': 'Cà phê sữa', 'price': 20000.0},
+      ]
+    },
   ];
 
   // ---------------- QUẢN LÝ MENU ----------------
 
-  // 1. Lấy danh sách menu từ bộ nhớ điện thoại
   static Future<List<Map<String, dynamic>>> fetchMenu() async {
     final prefs = await SharedPreferences.getInstance();
     final String? menuJson = prefs.getString(_keyMenu);
@@ -39,30 +77,34 @@ class LocalStorageService {
     }
   }
 
-  // 2. Lưu toàn bộ menu vào bộ nhớ điện thoại
   static Future<bool> saveMenu(List<Map<String, dynamic>> menu) async {
     final prefs = await SharedPreferences.getInstance();
     String encoded = jsonEncode(menu);
     return await prefs.setString(_keyMenu, encoded);
   }
 
-  // 3. Thêm món mới vào bộ nhớ điện thoại
-  static Future<bool> addMenuItem(String name, double price) async {
+  static Future<bool> addMenuItem({
+    required String name,
+    required String category,
+    required double defaultPrice,
+    required List<Map<String, dynamic>> variants,
+  }) async {
     List<Map<String, dynamic>> currentMenu = await fetchMenu();
     String newId = _uuid.v4();
     currentMenu.add({
       'id': newId,
       'name': name,
-      'price': price,
+      'category': category.isEmpty ? 'Khác' : category,
+      'price': defaultPrice,
+      'variants': variants,
     });
     bool success = await saveMenu(currentMenu);
     if (success) {
-      await addLog('ADMIN_ADD_ITEM', 'Thêm món mới: $name ($price VNĐ)');
+      await addLog('ADMIN_ADD_ITEM', 'Thêm món mới: $name (Danh mục: $category)');
     }
     return success;
   }
 
-  // 4. Xóa món khỏi bộ nhớ điện thoại
   static Future<bool> deleteMenuItem(String id) async {
     List<Map<String, dynamic>> currentMenu = await fetchMenu();
     var itemToRemove = currentMenu.firstWhere((item) => item['id'] == id, orElse: () => {});
@@ -76,16 +118,12 @@ class LocalStorageService {
     return success;
   }
 
-  // ---------------- QUẢN LÝ ĐƠN HÀNG ----------------
+  // ---------------- QUẢN LÝ ĐƠN HÀNG & LOGS ----------------
 
-  // 5. Lấy danh sách đơn hàng đã lưu trên điện thoại
   static Future<List<Map<String, dynamic>>> fetchOrders() async {
     final prefs = await SharedPreferences.getInstance();
     final String? ordersJson = prefs.getString(_keyOrders);
-
-    if (ordersJson == null || ordersJson.isEmpty) {
-      return [];
-    }
+    if (ordersJson == null || ordersJson.isEmpty) return [];
 
     try {
       List<dynamic> decoded = jsonDecode(ordersJson);
@@ -95,7 +133,6 @@ class LocalStorageService {
     }
   }
 
-  // 6. Lưu đơn hàng mới vào điện thoại
   static Future<bool> saveOrder(Map<String, dynamic> orderData) async {
     final prefs = await SharedPreferences.getInstance();
     List<Map<String, dynamic>> currentOrders = await fetchOrders();
@@ -103,8 +140,7 @@ class LocalStorageService {
     orderData['id'] = _uuid.v4().substring(0, 8).toUpperCase();
     currentOrders.add(orderData);
 
-    String encoded = jsonEncode(currentOrders);
-    bool success = await prefs.setString(_keyOrders, encoded);
+    bool success = await prefs.setString(_keyOrders, jsonEncode(currentOrders));
 
     if (success) {
       double total = double.tryParse(orderData['total'].toString()) ?? 0.0;
@@ -113,9 +149,6 @@ class LocalStorageService {
     return success;
   }
 
-  // ---------------- NHẬT KÝ THAO TÁC HỆ THỐNG ----------------
-
-  // 7. Ghi lại nhật ký thao tác
   static Future<void> addLog(String actionType, String detail) async {
     final prefs = await SharedPreferences.getInstance();
     List<Map<String, dynamic>> currentLogs = await fetchLogs();
@@ -133,14 +166,10 @@ class LocalStorageService {
     prefs.setString(_keyLogs, jsonEncode(currentLogs));
   }
 
-  // 8. Lấy danh sách nhật ký thao tác
   static Future<List<Map<String, dynamic>>> fetchLogs() async {
     final prefs = await SharedPreferences.getInstance();
     final String? logsJson = prefs.getString(_keyLogs);
-
-    if (logsJson == null || logsJson.isEmpty) {
-      return [];
-    }
+    if (logsJson == null || logsJson.isEmpty) return [];
 
     try {
       List<dynamic> decoded = jsonDecode(logsJson);
@@ -150,3 +179,4 @@ class LocalStorageService {
     }
   }
 }
+
