@@ -137,6 +137,23 @@ class LocalStorageService {
     _addLog('Tạo món mới: ${item['name']} bởi $myDeviceId');
   }
 
+  static Future<void> updateMenuItem(String id, Map<String, dynamic> updatedItem) async {
+    int idx = _menuList.indexWhere((e) => e['id'].toString() == id.toString());
+    if (idx != -1) {
+      _menuList[idx] = {..._menuList[idx], ...updatedItem};
+      _addLog('Cập nhật thông tin món: ${updatedItem['name']} bởi $myDeviceId');
+    }
+  }
+
+  static Future<void> deleteMenuItem(String id) async {
+    int idx = _menuList.indexWhere((e) => e['id'].toString() == id.toString());
+    if (idx != -1) {
+      String deletedName = _menuList[idx]['name'];
+      _menuList.removeAt(idx);
+      _addLog('Xóa món: $deletedName bởi $myDeviceId');
+    }
+  }
+
   // Đơn Hàng
   static Future<bool> saveOrder(Map<String, dynamic> order) async {
     _orders.add(order);
@@ -670,7 +687,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ------------------- 2. THỰC ĐƠN (ĐẦY ĐỦ PHẦN TẠO TOPPING, TẠO PHÂN LOẠI, TẠO ĐƠN VỊ TÍNH) -------------------
+// ------------------- 2. THỰC ĐƠN (TẠO, SỬA, XÓA MÓN & TOPPING, PHÂN LOẠI, ĐƠN VỊ TÍNH) -------------------
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({super.key});
 
@@ -697,26 +714,26 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     });
   }
 
-  void _addNewItemProcess() {
-    bool canCreateDirectly = LocalStorageService.hasPermission('createItem');
-    if (canCreateDirectly) {
-      _showCreateItemModal();
+  void _checkPermissionAndExecute(Function onSuccess) {
+    bool canCreate = LocalStorageService.hasPermission('createItem');
+    if (canCreate) {
+      onSuccess();
     } else {
-      _showPinPromptDialog();
+      _showPinPromptDialog(onSuccess);
     }
   }
 
-  void _showPinPromptDialog() {
+  void _showPinPromptDialog(Function onSuccess) {
     final pinController = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: const Text('Yêu cầu Mã PIN Tạo Món'),
+          title: const Text('Yêu cầu Mã PIN Quản Lý Món'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Thiết bị chưa được cấp quyền Tạo Món. Vui lòng nhập mã PIN (000):'),
+              const Text('Thiết bị chưa được cấp quyền Quản lý món. Nhập mã PIN (000):'),
               const SizedBox(height: 12),
               TextField(
                 controller: pinController,
@@ -735,7 +752,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
               onPressed: () {
                 if (LocalStorageService.verifyMasterCode(pinController.text.trim())) {
                   Navigator.pop(ctx);
-                  _showCreateItemModal();
+                  onSuccess();
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Mã PIN không đúng!'), backgroundColor: Colors.red),
@@ -808,19 +825,23 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     );
   }
 
-  // MODAL TẠO MÓN HOÀN CHỈNH (TẠO TOPPING + TẠO DANH MỤC + TẠO ĐƠN VỊ TÍNH)
-  void _showCreateItemModal() async {
-    final nameController = TextEditingController();
-    final priceController = TextEditingController();
+  // MODAL TẠO HOẶC SỬA MÓN (CÓ CHỈNH SỬA TOPPING, DANH MỤC, ĐƠN VỊ TÍNH)
+  void _showItemFormModal({Map<String, dynamic>? existingItem}) async {
+    final isEditing = existingItem != null;
+    final nameController = TextEditingController(text: isEditing ? existingItem['name'] : '');
+    final priceController = TextEditingController(text: isEditing ? existingItem['price'].toString() : '');
 
     List<String> categories = await LocalStorageService.fetchCategories();
     List<String> units = await LocalStorageService.fetchUnits();
 
-    String selectedCat = categories.isNotEmpty ? categories.firstWhere((c) => c != 'Tất cả', orElse: () => 'Đồ Uống') : 'Đồ Uống';
-    String selectedUnit = units.contains('ly') ? 'ly' : (units.isNotEmpty ? units.first : 'phần');
+    String selectedCat = isEditing
+        ? existingItem['category']
+        : (categories.isNotEmpty ? categories.firstWhere((c) => c != 'Tất cả', orElse: () => 'Đồ Uống') : 'Đồ Uống');
+    String selectedUnit = isEditing ? existingItem['unit'] : (units.contains('ly') ? 'ly' : (units.isNotEmpty ? units.first : 'phần'));
 
-    // Danh sách topping tạm thời cho món chuẩn bị tạo
-    List<Map<String, dynamic>> tempToppings = [];
+    List<Map<String, dynamic>> tempToppings = isEditing
+        ? (existingItem['toppings'] as List? ?? []).map((t) => Map<String, dynamic>.from(t)).toList()
+        : [];
 
     showModalBottomSheet(
       context: context,
@@ -839,7 +860,10 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Tạo Món Mới Khởi Tạo Đầy Đủ', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      isEditing ? 'Sửa Thông Tin Món' : 'Tạo Món Mới Khởi Tạo Đầy Đủ',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 12),
 
                     // Tên món
@@ -913,7 +937,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                     ),
                     const Divider(height: 24),
 
-                    // PHẦN TẠO DANH SÁCH TOPPING ĐI KÈM
+                    // PHẦN QUẢN LÝ DANH SÁCH TOPPING ĐI KÈM
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -922,7 +946,6 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                           icon: const Icon(Icons.add, size: 18),
                           label: const Text('Thêm Topping'),
                           onPressed: () {
-                            // Dialog thêm topping cho món này
                             final tNameController = TextEditingController();
                             final tPriceController = TextEditingController();
                             showDialog(
@@ -964,7 +987,6 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                       ],
                     ),
 
-                    // Hiển thị các Topping đã thêm
                     if (tempToppings.isEmpty)
                       const Text('Chưa có topping nào.', style: TextStyle(color: Colors.grey, fontSize: 12))
                     else
@@ -973,7 +995,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           title: Text(t['name']),
-                          subtitle: Text('+${formatMoney(t['price'])}'),
+                          subtitle: Text('+${formatMoney(double.tryParse(t['price'].toString()) ?? 0)}'),
                           trailing: IconButton(
                             icon: const Icon(Icons.close, color: Colors.red, size: 18),
                             onPressed: () {
@@ -994,22 +1016,35 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                         ),
                         onPressed: () async {
                           if (nameController.text.isNotEmpty && priceController.text.isNotEmpty) {
-                            await LocalStorageService.addMenuItem({
+                            final itemData = {
                               'name': nameController.text.trim(),
                               'category': selectedCat,
                               'price': double.tryParse(priceController.text) ?? 0.0,
                               'unit': selectedUnit,
-                              'stock': 100.0,
+                              'stock': isEditing ? (existingItem['stock'] ?? 100.0) : 100.0,
                               'toppings': List<Map<String, dynamic>>.from(tempToppings),
-                            });
+                            };
+
+                            if (isEditing) {
+                              await LocalStorageService.updateMenuItem(existingItem['id'].toString(), itemData);
+                            } else {
+                              await LocalStorageService.addMenuItem(itemData);
+                            }
+
                             Navigator.pop(ctx);
                             _loadMenuData();
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Đã lưu món mới thành công!'), backgroundColor: Colors.green),
+                              SnackBar(
+                                content: Text(isEditing ? 'Đã cập nhật món thành công!' : 'Đã lưu món mới thành công!'),
+                                backgroundColor: Colors.green,
+                              ),
                             );
                           }
                         },
-                        child: const Text('LƯU MÓN MỚI VÀO THỰC ĐƠN', style: TextStyle(fontWeight: FontWeight.bold)),
+                        child: Text(
+                          isEditing ? 'LƯU THAY ĐỔI' : 'LƯU MÓN MỚI VÀO THỰC ĐƠN',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                     )
                   ],
@@ -1022,15 +1057,41 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     );
   }
 
+  // DIALOG XÁC NHẬN XÓA MÓN
+  void _confirmDeleteDish(Map<String, dynamic> item) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Xác nhận xóa món'),
+        content: Text('Bạn có chắc chắn muốn xóa món "${item['name']}" khỏi thực đơn?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Hủy')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              await LocalStorageService.deleteMenuItem(item['id'].toString());
+              Navigator.pop(dialogCtx);
+              _loadMenuData();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Đã xóa món thành công!'), backgroundColor: Colors.orange),
+              );
+            },
+            child: const Text('Xóa'),
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Thực Đơn Món'),
+        title: const Text('Quản Lý Thực Đơn'),
         actions: [
           IconButton(
             icon: const Icon(Icons.add_circle, color: Color(0xFF0D9488), size: 28),
-            onPressed: _addNewItemProcess,
+            onPressed: () => _checkPermissionAndExecute(() => _showItemFormModal()),
           )
         ],
       ),
@@ -1046,7 +1107,26 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                 return Card(
                   child: ListTile(
                     title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('Danh mục: ${item['category']} | Giá: ${formatMoney(price)} / ${item['unit']}\nTopping đi kèm: ${toppings.length} loại'),
+                    subtitle: Text(
+                      'Danh mục: ${item['category']} | Giá: ${formatMoney(price)} / ${item['unit']}\nTopping đi kèm: ${toppings.length} loại',
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Nút SỬA
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          tooltip: 'Sửa món',
+                          onPressed: () => _checkPermissionAndExecute(() => _showItemFormModal(existingItem: item)),
+                        ),
+                        // Nút XÓA
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          tooltip: 'Xóa món',
+                          onPressed: () => _checkPermissionAndExecute(() => _confirmDeleteDish(item)),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -1391,7 +1471,7 @@ class _AdminPermissionScreenState extends State<AdminPermissionScreen> {
                       ),
                       SwitchListTile(
                         dense: true,
-                        title: const Text('Quyền Tạo Món Mới'),
+                        title: const Text('Quyền Quản Lý Món (Tạo/Sửa/Xóa)'),
                         value: perms['createItem'] ?? false,
                         onChanged: (val) => setState(() => LocalStorageService.togglePermission(devId, 'createItem', val)),
                       ),
