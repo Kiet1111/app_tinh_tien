@@ -1,20 +1,165 @@
 // lib/main.dart
 
 import 'package:flutter/material.dart';
-import 'services/api_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
-// Hàm hỗ trợ định dạng tiền tệ Việt Nam (VD: 170000 -> 170.000đ)
+// Hàm định dạng tiền tệ Việt Nam (VD: 170000 -> 170.000đ)
 String formatMoney(double amount) {
   String str = amount.toStringAsFixed(0);
   RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
   return '${str.replaceAllMapped(reg, (Match m) => '${m[1]}.')}đ';
 }
 
+// ------------------- LỚP XỬ LÝ DỮ LIỆU ĐỘC LẬP (LOCAL STORAGE) -------------------
+class LocalStorageService {
+  static final List<Map<String, dynamic>> _menuList = [
+    {
+      'id': '1',
+      'name': 'Cà Phê Sữa Đá',
+      'category': 'Đồ Uống',
+      'price': 25000.0,
+      'unit': 'ly',
+      'stock': 50.0,
+      'variants': [],
+      'toppings': []
+    },
+    {
+      'id': '2',
+      'name': 'Bạc Xỉu',
+      'category': 'Đồ Uống',
+      'price': 28000.0,
+      'unit': 'ly',
+      'stock': 30.0,
+      'variants': [],
+      'toppings': []
+    },
+    {
+      'id': '3',
+      'name': 'Bánh Mì Thịt',
+      'category': 'Đồ Ăn',
+      'price': 30000.0,
+      'unit': 'ổ',
+      'stock': 20.0,
+      'variants': [],
+      'toppings': []
+    },
+    {
+      'id': '4',
+      'name': 'Hủ Tếu Nam Vang',
+      'category': 'Đồ Ăn',
+      'price': 45000.0,
+      'unit': 'tô',
+      'stock': 15.0,
+      'variants': [],
+      'toppings': []
+    },
+    {
+      'id': '5',
+      'name': 'Dừa Nạo Sợi',
+      'category': 'Đồ Cân',
+      'price': 60000.0,
+      'unit': 'kg',
+      'stock': 10.0,
+      'variants': [],
+      'toppings': []
+    },
+  ];
+
+  static final List<Map<String, dynamic>> _orders = [];
+  static final List<Map<String, dynamic>> _expenses = [];
+  static final List<Map<String, dynamic>> _logs = [
+    {
+      'detail': 'Khởi động ứng dụng POS thành công',
+      'time': DateTime.now().toString().substring(0, 16)
+    }
+  ];
+
+  static Future<List<Map<String, dynamic>>> fetchMenu() async {
+    return List<Map<String, dynamic>>.from(_menuList);
+  }
+
+  static Future<void> addMenuItem(Map<String, dynamic> item) async {
+    item['id'] = DateTime.now().millisecondsSinceEpoch.toString();
+    _menuList.add(item);
+    _logs.add({
+      'detail': 'Thêm món mới: ${item['name']}',
+      'time': DateTime.now().toString().substring(0, 16)
+    });
+  }
+
+  static Future<void> updateMenuItem(Map<String, dynamic> item) async {
+    int idx = _menuList.indexWhere((e) => e['id'].toString() == item['id'].toString());
+    if (idx != -1) {
+      _menuList[idx] = item;
+      _logs.add({
+        'detail': 'Cập nhật món: ${item['name']}',
+        'time': DateTime.now().toString().substring(0, 16)
+      });
+    }
+  }
+
+  static Future<void> deleteMenuItem(String id) async {
+    int idx = _menuList.indexWhere((e) => e['id'].toString() == id);
+    if (idx != -1) {
+      String name = _menuList[idx]['name'];
+      _menuList.removeAt(idx);
+      _logs.add({
+        'detail': 'Xóa món: $name',
+        'time': DateTime.now().toString().substring(0, 16)
+      });
+    }
+  }
+
+  static Future<bool> saveOrder(Map<String, dynamic> order) async {
+    _orders.add(order);
+    List items = order['items'] ?? [];
+    for (var item in items) {
+      var dishId = item['dishId'];
+      var qty = item['qty'] ?? 1.0;
+      int idx = _menuList.indexWhere((e) => e['id'].toString() == dishId.toString());
+      if (idx != -1) {
+        double currentStock = double.tryParse(_menuList[idx]['stock'].toString()) ?? 0.0;
+        _menuList[idx]['stock'] = (currentStock - qty) < 0 ? 0.0 : (currentStock - qty);
+      }
+    }
+    _logs.add({
+      'detail': 'Thanh toán thành công đơn ${formatMoney(order['total'] ?? 0)}',
+      'time': DateTime.now().toString().substring(0, 16)
+    });
+    return true;
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchOrders() async {
+    return List<Map<String, dynamic>>.from(_orders);
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchExpenses() async {
+    return List<Map<String, dynamic>>.from(_expenses);
+  }
+
+  static Future<void> addExpense(String category, double amount, String note) async {
+    _expenses.add({
+      'category': category,
+      'amount': amount,
+      'note': note,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+    _logs.add({
+      'detail': 'Thêm chi phí [$category]: ${formatMoney(amount)}',
+      'time': DateTime.now().toString().substring(0, 16)
+    });
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchLogs() async {
+    return List<Map<String, dynamic>>.from(_logs);
+  }
+}
+
+// ------------------- CẤU HÌNH GIAO DIỆN CHÍNH -------------------
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -26,14 +171,13 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0D9488), // Teal M3
+          seedColor: const Color(0xFF0D9488),
           brightness: Brightness.light,
         ),
         scaffoldBackgroundColor: const Color(0xFFF8FAFC),
         appBarTheme: const AppBarTheme(
           centerTitle: false,
           elevation: 0,
-          scaffoldTextStyle: TextStyle(color: Colors.black87),
         ),
         cardTheme: CardTheme(
           elevation: 0,
@@ -100,7 +244,7 @@ class _MainTabScreenState extends State<MainTabScreen> {
   }
 }
 
-// ------------------- 1. MÀN HÌNH BÁN HÀNG (POS OPTIMIZED) -------------------
+// ------------------- 1. MÀN HÌNH BÁN HÀNG -------------------
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -153,7 +297,6 @@ class _HomeScreenState extends State<HomeScreen> {
   double get totalAmount => currentOrder.fold(
       0.0, (sum, item) => sum + (item['totalPrice'] as double));
 
-  // HỘP THOẠI CHỌN TRỌNG LƯỢNG / SỐ LƯỢNG NHANH
   void _openQuantityModal(Map<String, dynamic> dish) {
     String unit = dish['unit']?.toString().toLowerCase() ?? 'phần';
     bool isWeightUnit = unit == 'kg' || unit == 'g' || unit == 'gram';
@@ -163,15 +306,11 @@ class _HomeScreenState extends State<HomeScreen> {
     double baseUnitPrice = double.tryParse(dish['price'].toString()) ?? 0.0;
 
     List rawVariants = dish['variants'] ?? [];
-    List rawToppings = dish['toppings'] ?? [];
     List<Map<String, dynamic>> variants =
         rawVariants.map((v) => Map<String, dynamic>.from(v)).toList();
-    List<Map<String, dynamic>> toppings =
-        rawToppings.map((t) => Map<String, dynamic>.from(t)).toList();
 
     Map<String, dynamic>? selectedVariant =
         variants.isNotEmpty ? variants.first : null;
-    List<Map<String, dynamic>> selectedToppings = [];
 
     showModalBottomSheet(
       context: context,
@@ -197,10 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
               calculatedQty = double.tryParse(qtyController.text) ?? 1.0;
             }
 
-            double toppingsPrice = selectedToppings.fold(
-                0.0, (sum, t) => sum + (double.tryParse(t['price'].toString()) ?? 0.0));
-
-            double totalPrice = (currentUnitPrice * calculatedQty) + toppingsPrice;
+            double totalPrice = currentUnitPrice * calculatedQty;
 
             return Padding(
               padding: EdgeInsets.only(
@@ -236,30 +372,31 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
                       const SizedBox(height: 8),
-                      // CÁC NÚT BẤM CHỌN NHANH GRAM
                       Wrap(
                         spacing: 8,
-                        children: [100, 200, 300, 500].map((g) {
-                          return ActionChip(
-                            label: Text('+$g gram'),
-                            onPressed: () {
-                              double current =
-                                  double.tryParse(weightGramController.text) ?? 0;
-                              weightGramController.text =
-                                  (current + g).toStringAsFixed(0);
-                              qtyController.clear();
-                              setModalState(() {});
-                            },
-                          );
-                        }).toList()
-                          ..add(ActionChip(
+                        children: [
+                          ...[100, 200, 300, 500].map((g) {
+                            return ActionChip(
+                              label: Text('+$g g'),
+                              onPressed: () {
+                                double current =
+                                    double.tryParse(weightGramController.text) ?? 0;
+                                weightGramController.text =
+                                    (current + g).toStringAsFixed(0);
+                                qtyController.clear();
+                                setModalState(() {});
+                              },
+                            );
+                          }),
+                          ActionChip(
                             label: const Text('1 kg'),
                             onPressed: () {
                               qtyController.text = '1';
                               weightGramController.clear();
                               setModalState(() {});
                             },
-                          )),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 12),
                       Row(
@@ -410,7 +547,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // BẢNG CHI TIẾT ĐƠN HÀNG KHI BẤM VÀO GIỎ
   void _showCartBottomSheet() {
     showModalBottomSheet(
       context: context,
@@ -606,7 +742,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // DANH MỤC THU GỌN
           SizedBox(
             height: 40,
             child: ListView.builder(
@@ -637,8 +772,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 4),
-
-          // LƯỚI MÓN ĂN (3 CỘT - DỄ THAO TÁC)
           Expanded(
             child: isLoadingMenu
                 ? const Center(child: CircularProgressIndicator())
@@ -728,8 +861,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-
-      // THANH THANH TOÁN ĐÁY MÀN HÌNH (FLOATING BOTTOM BAR)
       bottomNavigationBar: currentOrder.isEmpty
           ? null
           : Container(
@@ -1105,21 +1236,18 @@ class _FinancialReportScreenState extends State<FinancialReportScreen> {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  // BỘ LỌC NÚT BẤM (SEGMENTED)
                   SegmentedButton<int>(
                     segments: const [
-                      ButtonSegment(value: 1, label: Text('Hôm nay')),
-                      ButtonSegment(value: 7, label: Text('7 ngày')),
-                      ButtonSegment(value: 30, label: Text('30 ngày')),
+                      ButtonSegment<int>(value: 1, label: Text('Hôm nay')),
+                      ButtonSegment<int>(value: 7, label: Text('7 ngày')),
+                      ButtonSegment<int>(value: 30, label: Text('30 ngày')),
                     ],
                     selected: {selectedPeriodDays},
-                    onSelectionChanged: (set) {
+                    onSelectionChanged: (Set<int> set) {
                       setState(() => selectedPeriodDays = set.first);
                     },
                   ),
                   const SizedBox(height: 12),
-
-                  // DASHBOARD LỢI NHUẬN RÒNG
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -1183,7 +1311,6 @@ class _FinancialReportScreenState extends State<FinancialReportScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(42),
@@ -1195,7 +1322,6 @@ class _FinancialReportScreenState extends State<FinancialReportScreen> {
                     label: const Text('NHẬP CHI PHÍ (GAS, ĐIỆN, NHÀ, HÀNG)',
                         style: TextStyle(color: Colors.red, fontSize: 12)),
                   ),
-
                   const SizedBox(height: 16),
                   const Align(
                     alignment: Alignment.centerLeft,
@@ -1204,7 +1330,6 @@ class _FinancialReportScreenState extends State<FinancialReportScreen> {
                             fontWeight: FontWeight.bold, fontSize: 14)),
                   ),
                   const SizedBox(height: 6),
-
                   ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
