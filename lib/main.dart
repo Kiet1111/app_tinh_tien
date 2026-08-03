@@ -57,7 +57,7 @@ class _MainTabScreenState extends State<MainTabScreen> {
             label: 'Báo Cáo',
           ),
           NavigationDestination(
-            icon: Icon(Icons.history_edu),
+            icon: Icon(Icons.history),
             label: 'Nhật Ký Máy',
           ),
         ],
@@ -66,7 +66,7 @@ class _MainTabScreenState extends State<MainTabScreen> {
   }
 }
 
-// ------------------- MÀN HÌNH TÍNH TIỀN & MENU -------------------
+// ------------------- MÀN HÌNH CHÍNH (POS) -------------------
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -98,6 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // PHÂN LOẠI DANH MỤC
   List<String> get categories {
     List<String> list = ['Tất cả'];
     for (var item in menuList) {
@@ -115,154 +116,235 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   double get totalAmount => currentOrder.fold(
-      0, (sum, item) => sum + (item['price'] * item['qty']));
+      0, (sum, item) => sum + (item['totalPrice'] * item['qty']));
 
-  // Chọn loại/phần ăn khi nhấn vào món có nhiều biến thể
-  void _onDishSelected(Map<String, dynamic> dish) {
-    List<dynamic> rawVariants = dish['variants'] ?? [];
+  // TÙY CHỈNH MÓN ÁN & BIẾN THỂ & TOPPING
+  void _openDishCustomizationModal(Map<String, dynamic> dish) {
+    List rawVariants = dish['variants'] ?? [];
+    List rawToppings = dish['toppings'] ?? [];
+
     List<Map<String, dynamic>> variants =
         rawVariants.map((v) => Map<String, dynamic>.from(v)).toList();
+    List<Map<String, dynamic>> toppings =
+        rawToppings.map((t) => Map<String, dynamic>.from(t)).toList();
 
-    if (variants.isEmpty) {
-      _showAddDishDialog(dish['name'], double.tryParse(dish['price'].toString()) ?? 0);
-    } else {
-      showModalBottomSheet(
-        context: context,
-        shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-        builder: (ctx) => Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Chọn phần: ${dish['name']}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              ...variants.map((v) {
-                double price = double.tryParse(v['price'].toString()) ?? 0;
-                return ListTile(
-                  title: Text(v['name'].toString(),
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                  trailing: Text('${price.toStringAsFixed(0)}đ',
-                      style: const TextStyle(
-                          color: Colors.teal,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _showAddDishDialog('${dish['name']} (${v['name']})', price);
-                  },
-                );
-              }),
-            ],
-          ),
-        ),
-      );
-    }
-  }
-
-  void _showAddDishDialog(String fullName, double defaultPrice) {
-    final priceController =
-        TextEditingController(text: defaultPrice.toStringAsFixed(0));
+    Map<String, dynamic>? selectedVariant =
+        variants.isNotEmpty ? variants.first : null;
+    List<Map<String, dynamic>> selectedToppings = [];
     final noteController = TextEditingController();
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Thêm: $fullName'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: priceController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Giá bán (VNĐ)',
-                suffixText: 'đ',
-                border: OutlineInputBorder(),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            double calculateItemPrice() {
+              double base = selectedVariant != null
+                  ? (double.tryParse(selectedVariant!['price'].toString()) ?? 0)
+                  : (double.tryParse(dish['price'].toString()) ?? 0);
+              double toppingTotal = selectedToppings.fold(
+                  0, (sum, t) => sum + (double.tryParse(t['price'].toString()) ?? 0));
+              return base + toppingTotal;
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                top: 16,
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
               ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: noteController,
-              decoration: const InputDecoration(
-                labelText: 'Ghi chú (Ví dụ: Không hành, nhiều ớt...)',
-                border: OutlineInputBorder(),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tùy chỉnh: ${dish['name']}',
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const Divider(),
+
+                    // QUẢN LÝ BIẾN THỂ (NẾU CÓ)
+                    if (variants.isNotEmpty) ...[
+                      const Text('Chọn phần / biến thể:',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: variants.map((v) {
+                          bool isSel = selectedVariant == v;
+                          return ChoiceChip(
+                            label: Text(
+                                '${v['name']} (${(double.tryParse(v['price'].toString()) ?? 0).toStringAsFixed(0)}đ)'),
+                            selected: isSel,
+                            selectedColor: Colors.teal,
+                            labelStyle: TextStyle(
+                                color: isSel ? Colors.white : Colors.black),
+                            onSelected: (val) {
+                              if (val) {
+                                setModalState(() => selectedVariant = v);
+                              }
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // TÙY CHỈNH TOPPING / MÓN THÊM
+                    if (toppings.isNotEmpty) ...[
+                      const Text('Chọn món thêm / Topping:',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, color: Colors.teal)),
+                      const SizedBox(height: 8),
+                      Column(
+                        children: toppings.map((t) {
+                          bool isChecked = selectedToppings.contains(t);
+                          double tPrice =
+                              double.tryParse(t['price'].toString()) ?? 0;
+                          return CheckboxListTile(
+                            title: Text(t['name'].toString()),
+                            subtitle: tPrice > 0
+                                ? Text('+${tPrice.toStringAsFixed(0)}đ')
+                                : const Text('Miễn phí'),
+                            value: isChecked,
+                            onChanged: (val) {
+                              setModalState(() {
+                                if (val == true) {
+                                  selectedToppings.add(t);
+                                } else {
+                                  selectedToppings.remove(t);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // GHI CHÚ RIÊNG
+                    TextField(
+                      controller: noteController,
+                      decoration: const InputDecoration(
+                        labelText: 'Ghi chú món (Ví dụ: Không hành, nhiều ớt)',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // NÚT THÊM VÀO ĐƠN
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: () {
+                          double unitPrice = calculateItemPrice();
+                          String fullName = selectedVariant != null
+                              ? '${dish['name']} (${selectedVariant!['name']})'
+                              : dish['name'];
+
+                          List<String> toppingNames = selectedToppings
+                              .map((e) => e['name'].toString())
+                              .toList();
+                          if (toppingNames.isNotEmpty) {
+                            fullName += ' + ${toppingNames.join(', ')}';
+                          }
+
+                          setState(() {
+                            currentOrder.add({
+                              'name': fullName,
+                              'price': unitPrice,
+                              'totalPrice': unitPrice,
+                              'qty': 1,
+                              'note': noteController.text.trim(),
+                            });
+                          });
+
+                          Navigator.pop(ctx);
+                        },
+                        child: Text(
+                          'THÊM VÀO ĐƠN - ${calculateItemPrice().toStringAsFixed(0)}đ',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+                    )
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
-          ElevatedButton(
-            onPressed: () {
-              double price = double.tryParse(priceController.text) ?? defaultPrice;
-              setState(() {
-                currentOrder.add({
-                  'name': fullName,
-                  'price': price,
-                  'qty': 1,
-                  'note': noteController.text,
-                });
-              });
-              Navigator.pop(ctx);
-            },
-            child: const Text('Thêm vào đơn'),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
+  // DIALOG THÊM MÓN DÀNH CHO ADMIN
   void _showAddMenuItemDialog() {
-    final nameController = TextEditingController();
-    final categoryController = TextEditingController();
-    final priceController = TextEditingController();
-    final variantsController = TextEditingController();
+    final nameCtrl = TextEditingController();
+    final catCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final variantsCtrl = TextEditingController();
+    final toppingsCtrl = TextEditingController();
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Thêm món / Danh mục mới'),
+        title: const Text('Thêm món mới (Admin)'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: nameController,
+                controller: nameCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Tên món (Ví dụ: Cháo / Nước ngọt)',
-                  border: OutlineInputBorder(),
-                ),
+                    labelText: 'Tên món (Ví dụ: Cháo / Trà sữa)',
+                    border: OutlineInputBorder()),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               TextField(
-                controller: categoryController,
+                controller: catCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Danh mục (Ví dụ: Món ăn / Nước uống)',
-                  border: OutlineInputBorder(),
-                ),
+                    labelText: 'Danh mục (Ví dụ: Món ăn / Nước uống)',
+                    border: OutlineInputBorder()),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               TextField(
-                controller: priceController,
+                controller: priceCtrl,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  labelText: 'Giá mặc định (VNĐ)',
+                    labelText: 'Giá mặc định (VNĐ)',
+                    border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: variantsCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Biến thể/Phần ăn (Mỗi dòng 1 loại)',
+                  hintText: 'Tô nhỏ:10000\nTô lớn:20000',
                   border: OutlineInputBorder(),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               TextField(
-                controller: variantsController,
-                maxLines: 3,
+                controller: toppingsCtrl,
+                maxLines: 2,
                 decoration: const InputDecoration(
-                  labelText: 'Các phần/loại (Mỗi loại 1 dòng)',
-                  hintText: 'Cháo 10k:10000\nCháo 20k:20000\nCháo xương:35000',
+                  labelText: 'Món thêm/Topping (Mỗi dòng 1 loại)',
+                  hintText: 'Thêm trứng:5000\nNhiều ớt:0',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -274,24 +356,31 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
           ElevatedButton(
             onPressed: () async {
-              String name = nameController.text.trim();
-              String category = categoryController.text.trim();
-              double defaultPrice = double.tryParse(priceController.text) ?? 0;
+              String name = nameCtrl.text.trim();
+              String category = catCtrl.text.trim();
+              double defaultPrice = double.tryParse(priceCtrl.text) ?? 0;
 
               List<Map<String, dynamic>> parsedVariants = [];
-              if (variantsController.text.trim().isNotEmpty) {
-                List<String> lines = variantsController.text.trim().split('\n');
-                for (var line in lines) {
+              if (variantsCtrl.text.trim().isNotEmpty) {
+                for (var line in variantsCtrl.text.trim().split('\n')) {
                   if (line.contains(':')) {
                     var parts = line.split(':');
                     parsedVariants.add({
                       'name': parts[0].trim(),
                       'price': double.tryParse(parts[1].trim()) ?? defaultPrice,
                     });
-                  } else if (line.trim().isNotEmpty) {
-                    parsedVariants.add({
-                      'name': line.trim(),
-                      'price': defaultPrice,
+                  }
+                }
+              }
+
+              List<Map<String, dynamic>> parsedToppings = [];
+              if (toppingsCtrl.text.trim().isNotEmpty) {
+                for (var line in toppingsCtrl.text.trim().split('\n')) {
+                  if (line.contains(':')) {
+                    var parts = line.split(':');
+                    parsedToppings.add({
+                      'name': parts[0].trim(),
+                      'price': double.tryParse(parts[1].trim()) ?? 0,
                     });
                   }
                 }
@@ -304,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   category: category.isEmpty ? 'Món khác' : category,
                   defaultPrice: defaultPrice,
                   variants: parsedVariants,
+                  toppings: parsedToppings,
                 );
                 if (success) _loadMenuFromStorage();
               }
@@ -316,30 +406,28 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showAdminAuthDialog() {
-    final pinController = TextEditingController();
+    final pinCtrl = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Xác thực quyền Admin'),
+        title: const Text('Xác thực Admin'),
         content: TextField(
-          controller: pinController,
+          controller: pinCtrl,
           obscureText: true,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
-            labelText: 'Mã PIN bảo mật (1234)',
-            border: OutlineInputBorder(),
-          ),
+              labelText: 'Mã PIN bảo mật (1234)', border: OutlineInputBorder()),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
           ElevatedButton(
             onPressed: () async {
-              if (pinController.text == adminPinCode) {
+              if (pinCtrl.text == adminPinCode) {
                 setState(() => isAdminMode = !isAdminMode);
                 Navigator.pop(ctx);
-                await LocalStorageService.addLog('ADMIN_LOGIN',
-                    isAdminMode ? 'Đăng nhập Admin' : 'Đăng xuất Admin');
+                await LocalStorageService.addLog('ADMIN_AUTH',
+                    isAdminMode ? 'Bật chế độ Admin' : 'Tắt chế độ Admin');
               }
             },
             child: Text(isAdminMode ? 'Tắt Admin' : 'Mở khóa'),
@@ -362,7 +450,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted && isSaved) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Thanh toán & Đã lưu đơn hàng!'),
+            content: Text('Thanh toán thành công (Đã lưu Offline)!'),
             backgroundColor: Colors.green),
       );
       setState(() => currentOrder.clear());
@@ -373,12 +461,29 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tính Tiền Quán Ăn'),
+        title: Row(
+          children: [
+            const Text('Tính Tiền'),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.green.shade100,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'OFFLINE',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadMenuFromStorage,
-          ),
+              icon: const Icon(Icons.refresh), onPressed: _loadMenuFromStorage),
           if (isAdminMode)
             IconButton(
               icon: const Icon(Icons.add_circle, color: Colors.teal),
@@ -393,7 +498,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // THANH CHỌN DANH MỤC MÓN ÁN
+          // THANH CHỌN DANH MỤC (CATEGORY)
           Container(
             height: 50,
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -431,7 +536,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
-                      childAspectRatio: 1.5,
+                      childAspectRatio: 1.4,
                       crossAxisSpacing: 8,
                       mainAxisSpacing: 8,
                     ),
@@ -441,11 +546,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       double price =
                           double.tryParse(dish['price'].toString()) ?? 0.0;
                       List variants = dish['variants'] ?? [];
+                      List toppings = dish['toppings'] ?? [];
 
                       return Card(
                         color: Colors.teal.shade50,
                         child: InkWell(
-                          onTap: () => _onDishSelected(dish),
+                          onTap: () => _openDishCustomizationModal(dish),
                           child: Stack(
                             children: [
                               Center(
@@ -459,7 +565,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     const SizedBox(height: 4),
                                     Text(
                                       variants.isNotEmpty
-                                          ? '${variants.length} lựa chọn'
+                                          ? '${variants.length} phần lựa chọn'
                                           : '${price.toStringAsFixed(0)}đ',
                                       style: TextStyle(
                                           color: variants.isNotEmpty
@@ -467,6 +573,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                               : Colors.teal,
                                           fontWeight: FontWeight.w600),
                                     ),
+                                    if (toppings.isNotEmpty)
+                                      Text(
+                                        '+${toppings.length} topping',
+                                        style: const TextStyle(
+                                            fontSize: 11, color: Colors.grey),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -493,7 +605,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const Divider(height: 1),
 
-          // DANH SÁCH ĐƠN HÀNG HIỆN TẠI
+          // DANH SÁCH ĐƠN HÀNG
           Expanded(
             flex: 1,
             child: Container(
@@ -503,7 +615,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Đơn hiện tại',
+                      const Text('Đơn hàng hiện tại',
                           style: TextStyle(
                               fontSize: 16, fontWeight: FontWeight.bold)),
                       Text('Tổng: ${totalAmount.toStringAsFixed(0)}đ',
@@ -523,7 +635,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           title: Text(
                               '${item['name']} - ${item['price'].toStringAsFixed(0)}đ'),
                           subtitle: item['note'].toString().isNotEmpty
-                              ? Text(item['note'])
+                              ? Text('Ghi chú: ${item['note']}',
+                                  style: const TextStyle(color: Colors.red))
                               : null,
                           trailing: IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
@@ -544,7 +657,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       onPressed: currentOrder.isEmpty ? null : _submitOrder,
                       icon: const Icon(Icons.check_circle),
-                      label: const Text('THANH TOÁN & LƯU ĐƠN'),
+                      label: const Text('THANH TOÁN & LƯU ĐƠN (OFFLINE)'),
                     ),
                   )
                 ],
@@ -593,10 +706,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       appBar: AppBar(
         title: const Text('Báo Cáo Doanh Thu'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadReports,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadReports)
         ],
       ),
       body: isLoading
@@ -613,7 +723,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                   child: Column(
                     children: [
-                      const Text('TỔNG DOANH THU',
+                      const Text('TỔNG DOANH THU OFFLINE',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
                       Text(
@@ -623,7 +733,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             fontWeight: FontWeight.bold,
                             color: Colors.teal),
                       ),
-                      Text('Tổng số đơn đã thanh toán: ${orders.length}'),
+                      Text('Tổng số đơn hàng: ${orders.length}'),
                     ],
                   ),
                 ),
@@ -633,7 +743,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     itemBuilder: (ctx, index) {
                       final order = orders[orders.length - 1 - index];
                       return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        margin:
+                            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                         child: ListTile(
                           leading: const Icon(Icons.receipt, color: Colors.teal),
                           title: Text('Đơn #${order['id']}'),
@@ -654,7 +765,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 }
 
-// ------------------- MÀN HÌNH NHẬT KÝ MÁY -------------------
+// ------------------- MÀN HÌNH NHẬT KÝ THAO TÁC -------------------
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key});
 
@@ -680,7 +791,7 @@ class _LogsScreenState extends State<LogsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nhật Ký Máy'),
+        title: const Text('Nhật Ký Thao Tác'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadLogs)
         ],
