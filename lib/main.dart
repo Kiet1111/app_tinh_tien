@@ -1,1526 +1,831 @@
-import 'lan_service.dart';
-
-// lib/main.dart
-
-import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
+import 'dart:convert';
+import 'package:app_tinh_tien/lan_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await LocalStorageService.initDeviceId();
-  runApp(const MyApp());
+  runApp(const PosApp());
 }
 
-// Định dạng tiền tệ VNĐ
-String formatMoney(double amount) {
-  String str = amount.toStringAsFixed(0);
-  RegExp reg = RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))');
-  return '${str.replaceAllMapped(reg, (Match m) => '${m[1]}.')}đ';
-}
-
-// ------------------- QUẢN LÝ DỮ LIỆU & PHÂN QUYỀN -------------------
-class LocalStorageService {
-  static const String masterCode = "000"; // Mã PIN Master
-  static String myDeviceId = ""; // Mã định danh thiết bị
-
-  static Future<void> initDeviceId() async {
-    if (myDeviceId.isEmpty) {
-      final random = Random();
-      int code = 1000 + random.nextInt(9000);
-      myDeviceId = "DEV-$code";
-    }
-    if (!_devicePermissions.containsKey(myDeviceId)) {
-      _devicePermissions[myDeviceId] = {
-        'viewOrderHistory': true,
-        'viewLogs': true,
-        'createItem': true,
-        'isAdmin': true,
-      };
-    }
-  }
-
-  static final Map<String, Map<String, bool>> _devicePermissions = {};
-
-  static bool hasPermission(String permKey, {String? deviceId}) {
-    String targetDev = deviceId ?? myDeviceId;
-    var perms = _devicePermissions[targetDev];
-    if (perms == null) return false;
-    if (perms['isAdmin'] == true) return true;
-    return perms[permKey] == true;
-  }
-
-  static void togglePermission(String targetDeviceId, String permKey, bool value) {
-    if (!_devicePermissions.containsKey(targetDeviceId)) {
-      _devicePermissions[targetDeviceId] = {
-        'viewOrderHistory': false,
-        'viewLogs': false,
-        'createItem': false,
-        'isAdmin': false,
-      };
-    }
-    _devicePermissions[targetDeviceId]![permKey] = value;
-    _addLog('Admin đã ${value ? "cấp" : "thu hồi"} quyền [$permKey] cho $targetDeviceId');
-  }
-
-  static Map<String, Map<String, bool>> getAllPermissions() => _devicePermissions;
-
-  // --- DỮ LIỆU DANH MỤC, ĐƠN VỊ TÍNH, THỰC ĐƠN ---
-  static final List<String> _categories = ['Tất cả', 'Đồ Uống', 'Đồ Ăn', 'Đồ Cân'];
-  static final List<String> _units = ['ly', 'cốc', 'chai', 'lon', 'đĩa', 'phần', 'kg', 'g'];
-
-  static final List<Map<String, dynamic>> _menuList = [
-    {
-      'id': '1',
-      'name': 'Cà Phê Sữa Đá',
-      'category': 'Đồ Uống',
-      'price': 25000.0,
-      'unit': 'ly',
-      'stock': 50.0,
-      'toppings': [
-        {'name': 'Trân châu đen', 'price': 5000.0},
-        {'name': 'Kem cheese', 'price': 10000.0},
-      ]
-    },
-    {
-      'id': '2',
-      'name': 'Trà Sữa Thái Xanh',
-      'category': 'Đồ Uống',
-      'price': 30000.0,
-      'unit': 'ly',
-      'stock': 40.0,
-      'toppings': [
-        {'name': 'Trân châu 3Q', 'price': 5000.0},
-        {'name': 'Pudding trứng', 'price': 7000.0},
-      ]
-    },
-    {
-      'id': '3',
-      'name': 'Dừa Nạo Sợi',
-      'category': 'Đồ Cân',
-      'price': 60000.0,
-      'unit': 'kg',
-      'stock': 10.0,
-      'toppings': []
-    },
-  ];
-
-  static final List<Map<String, dynamic>> _orders = [];
-  static final List<Map<String, dynamic>> _logs = [
-    {
-      'detail': 'Khởi động ứng dụng POS - Thiết bị: $myDeviceId',
-      'time': DateTime.now().toString().substring(0, 16),
-    }
-  ];
-
-  // Thao tác Danh Mục
-  static Future<List<String>> fetchCategories() async => List<String>.from(_categories);
-  static Future<void> addCategory(String name) async {
-    if (name.isNotEmpty && !_categories.contains(name)) {
-      _categories.add(name);
-      _addLog('Thêm danh mục mới: $name');
-    }
-  }
-
-  // Thao tác Đơn Vị Tính
-  static Future<List<String>> fetchUnits() async => List<String>.from(_units);
-  static Future<void> addUnit(String unit) async {
-    if (unit.isNotEmpty && !_units.contains(unit)) {
-      _units.add(unit);
-      _addLog('Thêm đơn vị tính mới: $unit');
-    }
-  }
-
-  // Thao tác Thực Đơn
-  static Future<List<Map<String, dynamic>>> fetchMenu() async => List<Map<String, dynamic>>.from(_menuList);
-
-  static Future<void> addMenuItem(Map<String, dynamic> item) async {
-    item['id'] = DateTime.now().millisecondsSinceEpoch.toString();
-    _menuList.add(item);
-    _addLog('Tạo món mới: ${item['name']} bởi $myDeviceId');
-  }
-
-  static Future<void> updateMenuItem(String id, Map<String, dynamic> updatedItem) async {
-    int idx = _menuList.indexWhere((e) => e['id'].toString() == id.toString());
-    if (idx != -1) {
-      _menuList[idx] = {..._menuList[idx], ...updatedItem};
-      _addLog('Cập nhật thông tin món: ${updatedItem['name']} bởi $myDeviceId');
-    }
-  }
-
-  static Future<void> deleteMenuItem(String id) async {
-    int idx = _menuList.indexWhere((e) => e['id'].toString() == id.toString());
-    if (idx != -1) {
-      String deletedName = _menuList[idx]['name'];
-      _menuList.removeAt(idx);
-      _addLog('Xóa món: $deletedName bởi $myDeviceId');
-    }
-  }
-
-  // Đơn Hàng
-  static Future<bool> saveOrder(Map<String, dynamic> order) async {
-    _orders.add(order);
-    List items = order['items'] ?? [];
-    for (var item in items) {
-      var dishId = item['dishId'];
-      var qty = item['qty'] ?? 1.0;
-      int idx = _menuList.indexWhere((e) => e['id'].toString() == dishId.toString());
-      if (idx != -1) {
-        double currentStock = double.tryParse(_menuList[idx]['stock'].toString()) ?? 0.0;
-        _menuList[idx]['stock'] = (currentStock - qty) < 0 ? 0.0 : (currentStock - qty);
-      }
-    }
-    _addLog('Tạo đơn #${order['id']} (${formatMoney(order['total'] ?? 0)})');
-    return true;
-  }
-
-  static Future<void> deleteOrder(String orderId) async {
-    _orders.removeWhere((o) => o['id'].toString() == orderId.toString());
-    _addLog('Đã xóa đơn hàng #$orderId');
-  }
-
-  static Future<List<Map<String, dynamic>>> fetchOrders() async => List<Map<String, dynamic>>.from(_orders);
-  static Future<List<Map<String, dynamic>>> fetchLogs() async => List<Map<String, dynamic>>.from(_logs);
-
-  static void _addLog(String detail) {
-    _logs.add({
-      'detail': detail,
-      'time': DateTime.now().toString().substring(0, 16),
-    });
-  }
-
-  static bool verifyMasterCode(String code) => code == masterCode;
-}
-
-// ------------------- GIAO DIỆN CHÍNH -------------------
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PosApp extends StatelessWidget {
+  const PosApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'Quản Lý Tính Tiền',
       debugShowCheckedModeBanner: false,
-      title: 'POS Bán Hàng Phân Quyền',
       theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0D9488),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-        ),
       ),
-      home: const MainTabScreen(),
+      home: const MainNavigationScreen(),
     );
   }
 }
 
-class MainTabScreen extends StatefulWidget {
-  const MainTabScreen({super.key});
+class MainNavigationScreen extends StatefulWidget {
+  const MainNavigationScreen({super.key});
 
   @override
-  State<MainTabScreen> createState() => _MainTabScreenState();
+  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
-class _MainTabScreenState extends State<MainTabScreen> {
+class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
+  String currentUserRole = 'Admin'; // Admin hoặc Staff
 
-  final List<Widget> _screens = [
-    const HomeScreen(),
-    const MenuManagementScreen(),
-    const EndOfDayReportScreen(),
-    const HistoryAndLogsScreen(),
-    const AdminPermissionScreen(),
-  ];
+  // Dữ liệu chung
+  List<Map<String, dynamic>> categories = ['Tất cả', 'Đồ uống', 'Món ăn']
+      .map((e) => {'id': e, 'name': e})
+      .toList();
+  List<Map<String, dynamic>> products = [];
+  List<Map<String, dynamic>> cart = [];
+  List<Map<String, dynamic>> expenses = [];
+  List<Map<String, dynamic>> orderLogs = [];
+  List<Map<String, dynamic>> actionLogs = [];
+  List<Map<String, dynamic>> dailyRevenueLogs = [];
+  List<Map<String, dynamic>> monthlyRevenueLogs = [];
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        height: 62,
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (idx) => setState(() => _currentIndex = idx),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.storefront_outlined),
-            selectedIcon: Icon(Icons.storefront, color: Color(0xFF0D9488)),
-            label: 'Bán Hàng',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.inventory_2_outlined),
-            selectedIcon: Icon(Icons.inventory_2, color: Color(0xFF0D9488)),
-            label: 'Thực Đơn',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.point_of_sale_outlined),
-            selectedIcon: Icon(Icons.point_of_sale, color: Color(0xFF0D9488)),
-            label: 'Lợi Nhuận',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history, color: Color(0xFF0D9488)),
-            label: 'Lịch Sử',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.admin_panel_settings_outlined),
-            selectedIcon: Icon(Icons.admin_panel_settings, color: Color(0xFF0D9488)),
-            label: 'Cấp Quyền',
-          ),
-        ],
-      ),
-    );
-  }
-}
+  double todayRevenue = 0;
+  double monthRevenue = 0;
+  String lastDateStr = '';
+  int lastMonthInt = 0;
 
-// ------------------- 1. MÀN HÌNH BÁN HÀNG (+/- TOPPING) -------------------
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  bool isOnline = true;
-  bool isLoadingMenu = true;
-
-  List<Map<String, dynamic>> menuList = [];
-  List<String> categories = ['Tất cả'];
-  List<Map<String, dynamic>> currentOrder = [];
-  String selectedCategory = 'Tất cả';
-  String searchQuery = '';
+  bool isOnlineLAN = false;
+  String? localIp;
+  final TextEditingController _serverIpController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadDataAndCheckReset();
+    _initLanStatus();
   }
 
-  Future<void> _loadData() async {
-    setState(() => isLoadingMenu = true);
-    final data = await LocalStorageService.fetchMenu();
-    final cats = await LocalStorageService.fetchCategories();
+  Future<void> _initLanStatus() async {
+    final ip = await LanService.getLocalIp();
     setState(() {
-      menuList = List<Map<String, dynamic>>.from(data);
-      categories = List<String>.from(cats);
-      isLoadingMenu = false;
+      localIp = ip;
     });
   }
 
-  List<Map<String, dynamic>> get filteredMenu {
-    return menuList.where((item) {
-      bool matchCat = selectedCategory == 'Tất cả' || item['category'] == selectedCategory;
-      bool matchSearch = searchQuery.isEmpty ||
-          item['name'].toString().toLowerCase().contains(searchQuery.toLowerCase());
-      return matchCat && matchSearch;
-    }).toList();
+  // KHU VỰC TỰ ĐỘNG RESET DOANH THU & LƯU NHẬT KÝ
+  Future<void> _loadDataAndCheckReset() async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+    final todayStr = "${now.year}-${now.month}-${now.day}";
+
+    lastDateStr = prefs.getString('last_date') ?? todayStr;
+    lastMonthInt = prefs.getInt('last_month') ?? now.month;
+
+    todayRevenue = prefs.getDouble('today_revenue') ?? 0;
+    monthRevenue = prefs.getDouble('month_revenue') ?? 0;
+
+    String? actionLogsJson = prefs.getString('action_logs');
+    if (actionLogsJson != null) actionLogs = List<Map<String, dynamic>>.from(jsonDecode(actionLogsJson));
+
+    String? orderLogsJson = prefs.getString('order_logs');
+    if (orderLogsJson != null) orderLogs = List<Map<String, dynamic>>.from(jsonDecode(orderLogsJson));
+
+    String? dailyLogsJson = prefs.getString('daily_revenue_logs');
+    if (dailyLogsJson != null) dailyRevenueLogs = List<Map<String, dynamic>>.from(jsonDecode(dailyLogsJson));
+
+    String? monthlyLogsJson = prefs.getString('monthly_revenue_logs');
+    if (monthlyLogsJson != null) monthlyRevenueLogs = List<Map<String, dynamic>>.from(jsonDecode(monthlyLogsJson));
+
+    String? expenseJson = prefs.getString('expenses');
+    if (expenseJson != null) expenses = List<Map<String, dynamic>>.from(jsonDecode(expenseJson));
+
+    String? productsJson = prefs.getString('products');
+    if (productsJson != null) {
+      products = List<Map<String, dynamic>>.from(jsonDecode(productsJson));
+    } else {
+      products = [
+        {
+          'id': '1',
+          'name': 'Cà phê sữa',
+          'category': 'Đồ uống',
+          'price': 25000.0,
+          'toppings': [
+            {'name': 'Trân châu', 'price': 5000.0, 'quantity': 0},
+            {'name': 'Thạch', 'price': 5000.0, 'quantity': 0}
+          ]
+        }
+      ];
+    }
+
+    // Reset tự động ngày
+    if (lastDateStr != todayStr) {
+      if (todayRevenue > 0) {
+        dailyRevenueLogs.add({
+          'date': lastDateStr,
+          'amount': todayRevenue,
+        });
+      }
+      todayRevenue = 0;
+      prefs.setString('last_date', todayStr);
+      _logAction("Hệ thống tự động reset doanh thu ngày mới ($todayStr)");
+    }
+
+    // Reset tự động tháng
+    if (lastMonthInt != now.month) {
+      if (monthRevenue > 0) {
+        monthlyRevenueLogs.add({
+          'month': "${now.year}-$lastMonthInt",
+          'amount': monthRevenue,
+        });
+      }
+      monthRevenue = 0;
+      prefs.setInt('last_month', now.month);
+      _logAction("Hệ thống tự động reset doanh thu tháng mới (${now.month}/${now.year})");
+    }
+
+    _saveData();
+    setState(() {});
   }
 
-  double get totalAmount => currentOrder.fold(0.0, (sum, item) => sum + (item['totalPrice'] as double));
+  Future<void> _saveData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('today_revenue', todayRevenue);
+    await prefs.setDouble('month_revenue', monthRevenue);
+    await prefs.setString('action_logs', jsonEncode(actionLogs));
+    await prefs.setString('order_logs', jsonEncode(orderLogs));
+    await prefs.setString('daily_revenue_logs', jsonEncode(dailyRevenueLogs));
+    await prefs.setString('monthly_revenue_logs', jsonEncode(monthlyRevenueLogs));
+    await prefs.setString('expenses', jsonEncode(expenses));
+    await prefs.setString('products', jsonEncode(products));
+  }
 
-  void _openQuantityModal(Map<String, dynamic> dish) {
-    String unit = dish['unit']?.toString().toLowerCase() ?? 'phần';
-    bool isWeightUnit = unit == 'kg' || unit == 'g' || unit == 'gram';
+  void _logAction(String message) {
+    final log = {
+      'time': DateTime.now().toString().substring(0, 19),
+      'user': currentUserRole,
+      'action': message,
+    };
+    actionLogs.insert(0, log);
+    _saveData();
+  }
 
-    final qtyController = TextEditingController(text: isWeightUnit ? '' : '1');
-    final weightGramController = TextEditingController();
-    double baseUnitPrice = double.tryParse(dish['price'].toString()) ?? 0.0;
+  // XỬ LÝ ĐƠN HÀNG VÀ BÁN HÀNG
+  void _addToCart(Map<String, dynamic> product) {
+    int index = cart.indexWhere((item) => item['id'] == product['id']);
+    if (index != -1) {
+      cart[index]['quantity']++;
+    } else {
+      List<Map<String, dynamic>> copiedToppings = (product['toppings'] as List)
+          .map((t) => {'name': t['name'], 'price': t['price'], 'quantity': 0})
+          .toList();
+      cart.add({
+        'id': product['id'],
+        'name': product['name'],
+        'price': product['price'],
+        'quantity': 1,
+        'toppings': copiedToppings
+      });
+    }
+    setState(() {});
+  }
 
-    List rawToppings = dish['toppings'] ?? [];
-    List<Map<String, dynamic>> toppingList = rawToppings
-        .map((t) => {
-              'name': t['name'],
-              'price': double.tryParse(t['price'].toString()) ?? 0.0,
-              'qty': 0
-            })
-        .toList();
+  void _checkout() async {
+    if (cart.isEmpty) return;
+    double total = 0;
+    for (var item in cart) {
+      double itemTotal = item['price'] * item['quantity'];
+      for (var t in item['toppings']) {
+        itemTotal += (t['price'] * t['quantity']) * item['quantity'];
+      }
+      total += itemTotal;
+    }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setModalState) {
-            double toppingTotal = toppingList.fold(0.0, (sum, t) => sum + (t['price'] as double) * (t['qty'] as int));
+    final orderData = {
+      'orderId': const Uuid().v4().substring(0, 8),
+      'time': DateTime.now().toString().substring(0, 19),
+      'items': List.from(cart),
+      'total': total,
+    };
 
-            double calculatedQty = 1.0;
-            if (isWeightUnit) {
-              if (weightGramController.text.isNotEmpty) {
-                double grams = double.tryParse(weightGramController.text) ?? 0;
-                calculatedQty = grams / 1000.0;
-              } else if (qtyController.text.isNotEmpty) {
-                calculatedQty = double.tryParse(qtyController.text) ?? 0.0;
-              }
-            } else {
-              calculatedQty = double.tryParse(qtyController.text) ?? 1.0;
-            }
+    if (isOnlineLAN && _serverIpController.text.isNotEmpty) {
+      await LanService.sendOrder(_serverIpController.text.trim(), orderData);
+    }
 
-            double totalPrice = (baseUnitPrice + toppingTotal) * calculatedQty;
-
-            return Padding(
-              padding: EdgeInsets.only(
-                top: 16, left: 16, right: 16,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(dish['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        ),
-                        Text('${formatMoney(baseUnitPrice)} / $unit',
-                            style: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold, fontSize: 16)),
-                      ],
-                    ),
-                    const Divider(height: 20),
-
-                    if (isWeightUnit) ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: weightGramController,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(labelText: 'Số Gram (g)', isDense: true),
-                              onChanged: (_) {
-                                qtyController.clear();
-                                setModalState(() {});
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextField(
-                              controller: qtyController,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(labelText: 'Số Kg (kg)', isDense: true),
-                              onChanged: (_) {
-                                weightGramController.clear();
-                                setModalState(() {});
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ] else ...[
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton.filledTonal(
-                            icon: const Icon(Icons.remove),
-                            onPressed: () {
-                              int current = int.tryParse(qtyController.text) ?? 1;
-                              if (current > 1) {
-                                qtyController.text = (current - 1).toString();
-                                setModalState(() {});
-                              }
-                            },
-                          ),
-                          SizedBox(
-                            width: 80,
-                            child: TextField(
-                              controller: qtyController,
-                              textAlign: TextAlign.center,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                              decoration: const InputDecoration(isDense: true),
-                              onChanged: (_) => setModalState(() {}),
-                            ),
-                          ),
-                          IconButton.filledTonal(
-                            icon: const Icon(Icons.add),
-                            onPressed: () {
-                              int current = int.tryParse(qtyController.text) ?? 1;
-                              qtyController.text = (current + 1).toString();
-                              setModalState(() {});
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-
-                    if (toppingList.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      const Text('Chọn Topping (+ / -):',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
-                      const SizedBox(height: 8),
-                      ...toppingList.map((t) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text('${t['name']} (+${formatMoney(t['price'])})'),
-                              Row(
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 22),
-                                    onPressed: t['qty'] > 0 ? () => setModalState(() => t['qty']--) : null,
-                                  ),
-                                  Text('${t['qty']}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  IconButton(
-                                    icon: const Icon(Icons.add_circle_outline, color: Colors.green, size: 22),
-                                    onPressed: () => setModalState(() => t['qty']++),
-                                  ),
-                                ],
-                              )
-                            ],
-                          ),
-                        );
-                      }),
-                    ],
-
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0D9488),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: calculatedQty <= 0
-                            ? null
-                            : () {
-                                String displayQty = isWeightUnit
-                                    ? (calculatedQty < 1
-                                        ? '${(calculatedQty * 1000).toStringAsFixed(0)}g'
-                                        : '${calculatedQty.toStringAsFixed(2)}kg')
-                                    : '${calculatedQty.toInt()} $unit';
-
-                                List<String> selectedTopStr = [];
-                                for (var t in toppingList) {
-                                  if (t['qty'] > 0) {
-                                    selectedTopStr.add('${t['name']} (x${t['qty']})');
-                                  }
-                                }
-
-                                String fullName = dish['name'];
-                                if (selectedTopStr.isNotEmpty) {
-                                  fullName += ' + [${selectedTopStr.join(', ')}]';
-                                }
-
-                                setState(() {
-                                  currentOrder.add({
-                                    'dishId': dish['id'],
-                                    'name': fullName,
-                                    'price': baseUnitPrice + toppingTotal,
-                                    'qty': calculatedQty,
-                                    'displayQty': displayQty,
-                                    'totalPrice': totalPrice,
-                                  });
-                                });
-                                Navigator.pop(ctx);
-                              },
-                        child: Text('THÊM VÀO ĐƠN • ${formatMoney(totalPrice)}',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+    _processNewOrder(orderData);
+    setState(() {
+      cart.clear();
+    });
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Thanh toán thành công: ${total.toStringAsFixed(0)} VNĐ')),
     );
   }
 
-  void _submitOrder() async {
-    if (currentOrder.isEmpty) return;
+  void _processNewOrder(Map<String, dynamic> order) {
+    double total = order['total'];
+    todayRevenue += total;
+    monthRevenue += total;
 
-    final orderData = {
-      'id': DateTime.now().millisecondsSinceEpoch.toString().substring(7),
-      'timestamp': DateTime.now().toIso8601String(),
-      'total': totalAmount,
-      'items': List<Map<String, dynamic>>.from(currentOrder),
-    };
-
-    bool isSaved = await LocalStorageService.saveOrder(orderData);
-    if (mounted && isSaved) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tạo đơn hàng thành công!'), backgroundColor: Colors.green),
-      );
-      setState(() => currentOrder.clear());
-      _loadData();
-    }
+    orderLogs.insert(0, order);
+    _logAction("Tạo đơn hàng thành công #${order['orderId']} - Tổng: ${total.toStringAsFixed(0)}đ");
+    _saveData();
   }
+
+  // TÍNH TOÁN LỢI NHUẬN RÒNG
+  double get totalExpenses => expenses.fold(0, (sum, item) => sum + (item['amount'] as double));
+  double get netProfitToday => todayRevenue - totalExpenses;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: SizedBox(
-          height: 38,
-          child: TextField(
-            onChanged: (val) => setState(() => searchQuery = val),
-            decoration: InputDecoration(
-              hintText: 'Tìm nhanh món...',
-              prefixIcon: const Icon(Icons.search, size: 18),
-              contentPadding: EdgeInsets.zero,
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
-            ),
-          ),
-        ),
+        title: Text('POS LAN - Quyền: $currentUserRole'),
         actions: [
           IconButton(
-            icon: Icon(isOnline ? Icons.wifi : Icons.wifi_off, color: isOnline ? Colors.green : Colors.orange),
-            onPressed: () => setState(() => isOnline = !isOnline),
+            icon: Icon(isOnlineLAN ? Icons.wifi : Icons.wifi_off, color: isOnlineLAN ? Colors.green : Colors.red),
+            onPressed: _showLanConfigDialog,
+          ),
+          PopupMenuButton<String>(
+            onSelected: (val) {
+              setState(() {
+                currentUserRole = val;
+              });
+              _logAction("Chuyển quyền sang: $val");
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'Admin', child: Text('Quyền Admin')),
+              const PopupMenuItem(value: 'Staff', child: Text('Quyền Nhân viên')),
+            ],
           )
         ],
       ),
-      body: Column(
+      body: IndexedStack(
+        index: _currentIndex,
         children: [
-          SizedBox(
-            height: 40,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              itemCount: categories.length,
-              itemBuilder: (ctx, index) {
-                String cat = categories[index];
-                bool isSelected = cat == selectedCategory;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: ChoiceChip(
-                    label: Text(cat),
-                    selected: isSelected,
-                    selectedColor: const Color(0xFF0D9488),
-                    labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black87),
-                    onSelected: (val) {
-                      if (val) setState(() => selectedCategory = cat);
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-          Expanded(
-            child: isLoadingMenu
-                ? const Center(child: CircularProgressIndicator())
-                : GridView.builder(
-                    padding: const EdgeInsets.all(8),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 0.95,
-                      crossAxisSpacing: 6,
-                      mainAxisSpacing: 6,
-                    ),
-                    itemCount: filteredMenu.length,
-                    itemBuilder: (ctx, index) {
-                      final dish = filteredMenu[index];
-                      double price = double.tryParse(dish['price'].toString()) ?? 0.0;
-                      return Card(
-                        child: InkWell(
-                          onTap: () => _openQuantityModal(dish),
-                          child: Padding(
-                            padding: const EdgeInsets.all(6.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(dish['name'],
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                Text(formatMoney(price),
-                                    style: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          if (currentOrder.isNotEmpty) ...[
-            Container(
-              color: Colors.white,
-              child: Column(
-                children: [
-                  const Divider(height: 1),
-                  ListTile(
-                    title: Text('Đơn hàng hiện tại (${currentOrder.length} món)'),
-                    subtitle: const Text('Tạo & Xóa món không cần PIN', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    trailing: TextButton.icon(
-                      icon: const Icon(Icons.delete_sweep, color: Colors.red),
-                      label: const Text('Xóa hết', style: TextStyle(color: Colors.red)),
-                      onPressed: () => setState(() => currentOrder.clear()),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          ]
+          _buildPOSView(),
+          _buildProductManagementView(),
+          _buildFinanceView(),
+          _buildLogsView(),
         ],
       ),
-      bottomNavigationBar: currentOrder.isEmpty
-          ? null
-          : Container(
-              padding: const EdgeInsets.all(12),
-              color: Colors.white,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D9488),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                onPressed: _submitOrder,
-                child: Text('TẠO ĐƠN HÀNG • ${formatMoney(totalAmount)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ),
-            ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.point_of_sale), label: 'Bán hàng'),
+          BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu), label: 'Món ăn'),
+          BottomNavigationBarItem(icon: Icon(Icons.monetization_on), label: 'Doanh thu'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Nhật ký'),
+        ],
+      ),
     );
   }
-}
 
-// ------------------- 2. THỰC ĐƠN (TẠO, SỬA, XÓA MÓN & TOPPING, PHÂN LOẠI, ĐƠN VỊ TÍNH) -------------------
-class MenuManagementScreen extends StatefulWidget {
-  const MenuManagementScreen({super.key});
-
-  @override
-  State<MenuManagementScreen> createState() => _MenuManagementScreenState();
-}
-
-class _MenuManagementScreenState extends State<MenuManagementScreen> {
-  List<Map<String, dynamic>> menuList = [];
-  bool isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMenuData();
-  }
-
-  Future<void> _loadMenuData() async {
-    setState(() => isLoading = true);
-    final data = await LocalStorageService.fetchMenu();
-    setState(() {
-      menuList = List<Map<String, dynamic>>.from(data);
-      isLoading = false;
-    });
-  }
-
-  void _checkPermissionAndExecute(Function onSuccess) {
-    bool canCreate = LocalStorageService.hasPermission('createItem');
-    if (canCreate) {
-      onSuccess();
-    } else {
-      _showPinPromptDialog(onSuccess);
-    }
-  }
-
-  void _showPinPromptDialog(Function onSuccess) {
-    final pinController = TextEditingController();
+  // DIALOG CẤU HÌNH MẠNG LAN (ONLINE / OFFLINE)
+  void _showLanConfigDialog() {
     showDialog(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Yêu cầu Mã PIN Quản Lý Món'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Cấu hình Mạng LAN / Offline'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Thiết bị chưa được cấp quyền Quản lý món. Nhập mã PIN (000):'),
-              const SizedBox(height: 12),
+              Text('IP thiết bị này: ${localIp ?? "Không kết nối Wi-Fi"}'),
+              const SizedBox(height: 10),
+              SwitchListTile(
+                title: const Text('Chế độ Server LAN'),
+                value: isOnlineLAN,
+                onChanged: (val) async {
+                  if (val) {
+                    await LanService.startServer(orderLogs, (newOrder) {
+                      setState(() {
+                        _processNewOrder(newOrder);
+                      });
+                    });
+                  } else {
+                    await LanService.stopServer();
+                  }
+                  setDialogState(() {
+                    isOnlineLAN = val;
+                  });
+                  setState(() {});
+                },
+              ),
+              const SizedBox(height: 10),
               TextField(
-                controller: pinController,
-                keyboardType: TextInputType.number,
-                obscureText: true,
-                maxLength: 4,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 20, letterSpacing: 6),
-                decoration: const InputDecoration(hintText: '***'),
+                controller: _serverIpController,
+                decoration: const InputDecoration(
+                  labelText: 'IP Máy Chủ để đồng bộ (nếu là máy phụ)',
+                  border: OutlineInputBorder(),
+                ),
               ),
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
-            ElevatedButton(
-              onPressed: () {
-                if (LocalStorageService.verifyMasterCode(pinController.text.trim())) {
-                  Navigator.pop(ctx);
-                  onSuccess();
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Mã PIN không đúng!'), backgroundColor: Colors.red),
-                  );
-                }
-              },
-              child: const Text('Xác nhận'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Đóng'))
           ],
-        );
-      },
-    );
-  }
-
-  // DIALOG TẠO DANH MỤC MỚI
-  void _showAddCategoryDialog(Function(String) onAdded) {
-    final catController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Tạo Danh Mục Mới'),
-        content: TextField(
-          controller: catController,
-          decoration: const InputDecoration(hintText: 'Nhập tên danh mục (Ví dụ: Trà Trái Cây)'),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
-          ElevatedButton(
-            onPressed: () async {
-              String name = catController.text.trim();
-              if (name.isNotEmpty) {
-                await LocalStorageService.addCategory(name);
-                onAdded(name);
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('Thêm'),
-          )
-        ],
       ),
     );
   }
 
-  // DIALOG TẠO ĐƠN VỊ TÍNH MỚI
-  void _showAddUnitDialog(Function(String) onAdded) {
-    final unitController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Tạo Đơn Vị Tính Mới'),
-        content: TextField(
-          controller: unitController,
-          decoration: const InputDecoration(hintText: 'Nhập đơn vị tính (Ví dụ: xô, tô, bao, lon)'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
-          ElevatedButton(
-            onPressed: () async {
-              String unit = unitController.text.trim();
-              if (unit.isNotEmpty) {
-                await LocalStorageService.addUnit(unit);
-                onAdded(unit);
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text('Thêm'),
-          )
-        ],
-      ),
-    );
-  }
-
-  // MODAL TẠO HOẶC SỬA MÓN (CÓ CHỈNH SỬA TOPPING, DANH MỤC, ĐƠN VỊ TÍNH)
-  void _showItemFormModal({Map<String, dynamic>? existingItem}) async {
-    final isEditing = existingItem != null;
-    final nameController = TextEditingController(text: isEditing ? existingItem['name'] : '');
-    final priceController = TextEditingController(text: isEditing ? existingItem['price'].toString() : '');
-
-    List<String> categories = await LocalStorageService.fetchCategories();
-    List<String> units = await LocalStorageService.fetchUnits();
-
-    String selectedCat = isEditing
-        ? existingItem['category']
-        : (categories.isNotEmpty ? categories.firstWhere((c) => c != 'Tất cả', orElse: () => 'Đồ Uống') : 'Đồ Uống');
-    String selectedUnit = isEditing ? existingItem['unit'] : (units.contains('ly') ? 'ly' : (units.isNotEmpty ? units.first : 'phần'));
-
-    List<Map<String, dynamic>> tempToppings = isEditing
-        ? (existingItem['toppings'] as List? ?? []).map((t) => Map<String, dynamic>.from(t)).toList()
-        : [];
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                top: 16, left: 16, right: 16,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isEditing ? 'Sửa Thông Tin Món' : 'Tạo Món Mới Khởi Tạo Đầy Đủ',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Tên món
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: 'Tên món', isDense: true, border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Giá bán
-                    TextField(
-                      controller: priceController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Giá bán gốc (VNĐ)', isDense: true, border: OutlineInputBorder()),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Chọn & Tạo Danh Mục
-                    Row(
+  // 1. MÀN HÌNH BÁN HÀNG (POS)
+  Widget _buildPOSView() {
+    return Column(
+      children: [
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(8),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2, childAspectRatio: 1.2, crossAxisSpacing: 8, mainAxisSpacing: 8),
+            itemCount: products.length,
+            itemBuilder: (context, index) {
+              final p = products[index];
+              return Card(
+                color: Colors.orange.shade50,
+                child: InkWell(
+                  onTap: () => _addToCart(p),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: categories.contains(selectedCat) ? selectedCat : null,
-                            decoration: const InputDecoration(labelText: 'Danh mục', isDense: true, border: OutlineInputBorder()),
-                            items: categories.where((c) => c != 'Tất cả').map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                            onChanged: (val) {
-                              if (val != null) setModalState(() => selectedCat = val);
-                            },
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add_circle, color: Color(0xFF0D9488)),
-                          tooltip: 'Thêm Danh Mục',
-                          onPressed: () => _showAddCategoryDialog((newCat) async {
-                            var newCats = await LocalStorageService.fetchCategories();
-                            setModalState(() {
-                              categories = newCats;
-                              selectedCat = newCat;
-                            });
-                          }),
-                        )
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Chọn & Tạo Đơn Vị Tính
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: units.contains(selectedUnit) ? selectedUnit : null,
-                            decoration: const InputDecoration(labelText: 'Đơn vị tính', isDense: true, border: OutlineInputBorder()),
-                            items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
-                            onChanged: (val) {
-                              if (val != null) setModalState(() => selectedUnit = val);
-                            },
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.add_circle, color: Color(0xFF0D9488)),
-                          tooltip: 'Thêm Đơn Vị Tính',
-                          onPressed: () => _showAddUnitDialog((newUnit) async {
-                            var newUnits = await LocalStorageService.fetchUnits();
-                            setModalState(() {
-                              units = newUnits;
-                              selectedUnit = newUnit;
-                            });
-                          }),
-                        )
-                      ],
-                    ),
-                    const Divider(height: 24),
-
-                    // PHẦN QUẢN LÝ DANH SÁCH TOPPING ĐI KÈM
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Danh Sách Topping Đi Kèm:', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
-                        TextButton.icon(
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Thêm Topping'),
-                          onPressed: () {
-                            final tNameController = TextEditingController();
-                            final tPriceController = TextEditingController();
-                            showDialog(
-                              context: context,
-                              builder: (dialogCtx) => AlertDialog(
-                                title: const Text('Thêm Topping Mới'),
-                                content: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    TextField(controller: tNameController, decoration: const InputDecoration(labelText: 'Tên Topping')),
-                                    TextField(
-                                      controller: tPriceController,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(labelText: 'Giá Topping (VNĐ)'),
-                                    ),
-                                  ],
-                                ),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Hủy')),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      if (tNameController.text.isNotEmpty) {
-                                        setModalState(() {
-                                          tempToppings.add({
-                                            'name': tNameController.text.trim(),
-                                            'price': double.tryParse(tPriceController.text) ?? 0.0,
-                                          });
-                                        });
-                                        Navigator.pop(dialogCtx);
-                                      }
-                                    },
-                                    child: const Text('Thêm'),
-                                  )
-                                ],
-                              ),
-                            );
-                          },
-                        )
-                      ],
-                    ),
-
-                    if (tempToppings.isEmpty)
-                      const Text('Chưa có topping nào.', style: TextStyle(color: Colors.grey, fontSize: 12))
-                    else
-                      ...tempToppings.map((t) {
-                        return ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(t['name']),
-                          subtitle: Text('+${formatMoney(double.tryParse(t['price'].toString()) ?? 0)}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.close, color: Colors.red, size: 18),
-                            onPressed: () {
-                              setModalState(() => tempToppings.remove(t));
-                            },
-                          ),
-                        );
-                      }),
-
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0D9488),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed: () async {
-                          if (nameController.text.isNotEmpty && priceController.text.isNotEmpty) {
-                            final itemData = {
-                              'name': nameController.text.trim(),
-                              'category': selectedCat,
-                              'price': double.tryParse(priceController.text) ?? 0.0,
-                              'unit': selectedUnit,
-                              'stock': isEditing ? (existingItem['stock'] ?? 100.0) : 100.0,
-                              'toppings': List<Map<String, dynamic>>.from(tempToppings),
-                            };
-
-                            if (isEditing) {
-                              await LocalStorageService.updateMenuItem(existingItem['id'].toString(), itemData);
-                            } else {
-                              await LocalStorageService.addMenuItem(itemData);
-                            }
-
-                            Navigator.pop(ctx);
-                            _loadMenuData();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(isEditing ? 'Đã cập nhật món thành công!' : 'Đã lưu món mới thành công!'),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                          }
-                        },
-                        child: Text(
-                          isEditing ? 'LƯU THAY ĐỔI' : 'LƯU MÓN MỚI VÀO THỰC ĐƠN',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    )
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // DIALOG XÁC NHẬN XÓA MÓN
-  void _confirmDeleteDish(Map<String, dynamic> item) {
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Xác nhận xóa món'),
-        content: Text('Bạn có chắc chắn muốn xóa món "${item['name']}" khỏi thực đơn?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Hủy')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () async {
-              await LocalStorageService.deleteMenuItem(item['id'].toString());
-              Navigator.pop(dialogCtx);
-              _loadMenuData();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Đã xóa món thành công!'), backgroundColor: Colors.orange),
-              );
-            },
-            child: const Text('Xóa'),
-          )
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Quản Lý Thực Đơn'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle, color: Color(0xFF0D9488), size: 28),
-            onPressed: () => _checkPermissionAndExecute(() => _showItemFormModal()),
-          )
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              padding: const EdgeInsets.all(8),
-              itemCount: menuList.length,
-              itemBuilder: (ctx, index) {
-                final item = menuList[index];
-                double price = double.tryParse(item['price'].toString()) ?? 0;
-                List toppings = item['toppings'] ?? [];
-                return Card(
-                  child: ListTile(
-                    title: Text(item['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text(
-                      'Danh mục: ${item['category']} | Giá: ${formatMoney(price)} / ${item['unit']}\nTopping đi kèm: ${toppings.length} loại',
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Nút SỬA
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          tooltip: 'Sửa món',
-                          onPressed: () => _checkPermissionAndExecute(() => _showItemFormModal(existingItem: item)),
-                        ),
-                        // Nút XÓA
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.red),
-                          tooltip: 'Xóa món',
-                          onPressed: () => _checkPermissionAndExecute(() => _confirmDeleteDish(item)),
-                        ),
+                        Text(p['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        const SizedBox(height: 4),
+                        Text('${p['price'].toStringAsFixed(0)} VNĐ', style: const TextStyle(color: Colors.deepOrange)),
+                        const SizedBox(height: 8),
+                        const Icon(Icons.add_shopping_cart, color: Colors.deepOrange),
                       ],
                     ),
                   ),
-                );
-              },
-            ),
+                ),
+              );
+            },
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.grey.shade200,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Giỏ hàng: ${cart.length} món', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.deepOrange, foregroundColor: Colors.white),
+                onPressed: _showCartBottomSheet,
+                icon: const Icon(Icons.shopping_cart),
+                label: const Text('Xem Giỏ Hàng'),
+              )
+            ],
+          ),
+        )
+      ],
     );
   }
-}
 
-// ------------------- 3. MÀN HÌNH CHỐT LỢI NHUẬN CUỐI NGÀY -------------------
-class EndOfDayReportScreen extends StatefulWidget {
-  const EndOfDayReportScreen({super.key});
+  void _showCartBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          double cartTotal = 0;
+          for (var item in cart) {
+            double itemTotal = item['price'] * item['quantity'];
+            for (var t in item['toppings']) {
+              itemTotal += (t['price'] * t['quantity']) * item['quantity'];
+            }
+            cartTotal += itemTotal;
+          }
 
-  @override
-  State<EndOfDayReportScreen> createState() => _EndOfDayReportScreenState();
-}
-
-class _EndOfDayReportScreenState extends State<EndOfDayReportScreen> {
-  DateTime selectedDate = DateTime.now();
-  List<Map<String, dynamic>> orders = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadData();
-  }
-
-  Future<void> _loadData() async {
-    final allOrders = await LocalStorageService.fetchOrders();
-    String targetDateStr = selectedDate.toIso8601String().substring(0, 10);
-    setState(() {
-      orders = allOrders.where((o) => o['timestamp'].toString().startsWith(targetDateStr)).toList();
-    });
-  }
-
-  double get dayRevenue => orders.fold(0.0, (sum, o) => sum + (double.tryParse(o['total'].toString()) ?? 0.0));
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Báo Cáo Lợi Nhuận')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFFECFDF5),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF10B981)),
-              ),
-              child: Column(
-                children: [
-                  const Text('TỔNG DOANH THU HÔM NAY', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  Text(formatMoney(dayRevenue),
-                      style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: Color(0xFF059669))),
-                ],
-              ),
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.75,
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                const Text('Chi Tiết Đơn Hàng', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Divider(),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: cart.length,
+                    itemBuilder: (context, index) {
+                      final item = cart[index];
+                      return Card(
+                        child: ExpansionTile(
+                          title: Text('${item['name']} x${item['quantity']}'),
+                          subtitle: Text('Giá: ${item['price'].toStringAsFixed(0)}đ'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle_outline),
+                                onPressed: () {
+                                  setSheetState(() {
+                                    if (item['quantity'] > 1) {
+                                      item['quantity']--;
+                                    } else {
+                                      cart.removeAt(index);
+                                    }
+                                  });
+                                  setState(() {});
+                                },
+                              ),
+                              Text('${item['quantity']}'),
+                              IconButton(
+                                icon: const Icon(Icons.add_circle_outline),
+                                onPressed: () {
+                                  setSheetState(() {
+                                    item['quantity']++;
+                                  });
+                                  setState(() {});
+                                },
+                              ),
+                            ],
+                          ),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Topping:', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ...List.generate(item['toppings'].length, (tIdx) {
+                                    final top = item['toppings'][tIdx];
+                                    return Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text('${top['name']} (+${top['price'].toStringAsFixed(0)}đ)'),
+                                        Row(
+                                          children: [
+                                            IconButton(
+                                              icon: const Icon(Icons.remove, size: 16),
+                                              onPressed: () {
+                                                setSheetState(() {
+                                                  if (top['quantity'] > 0) top['quantity']--;
+                                                });
+                                                setState(() {});
+                                              },
+                                            ),
+                                            Text('${top['quantity']}'),
+                                            IconButton(
+                                              icon: const Icon(Icons.add, size: 16),
+                                              onPressed: () {
+                                                setSheetState(() {
+                                                  top['quantity']++;
+                                                });
+                                                setState(() {});
+                                              },
+                                            ),
+                                          ],
+                                        )
+                                      ],
+                                    );
+                                  })
+                                ],
+                              ),
+                            )
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Text('Tổng thanh toán: ${cartTotal.toStringAsFixed(0)} VNĐ',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                    onPressed: cart.isEmpty ? null : _checkout,
+                    child: const Text('XÁC NHẬN THANH TOÁN'),
+                  ),
+                )
+              ],
             ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView.builder(
-                itemCount: orders.length,
-                itemBuilder: (ctx, idx) {
-                  final order = orders[idx];
-                  return Card(
-                    child: ListTile(
-                      title: Text('Đơn hàng #${order['id']}'),
-                      subtitle: Text(order['timestamp'].toString().substring(11, 16)),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(formatMoney(double.tryParse(order['total'].toString()) ?? 0),
-                              style: const TextStyle(fontWeight: FontWeight.bold)),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline, color: Colors.red),
-                            onPressed: () async {
-                              await LocalStorageService.deleteOrder(order['id'].toString());
-                              _loadData();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Đã xóa đơn hàng thành công!')),
-                              );
-                            },
-                          )
-                        ],
+          );
+        },
+      ),
+    );
+  }
+
+  // 2. MÀN HÌNH QUẢN LÝ MÓN ÁN & DANH MỤC (CHỈ ADMIN)
+  Widget _buildProductManagementView() {
+    if (currentUserRole != 'Admin') {
+      return const Center(child: Text('Bạn không có quyền Admin để chỉnh sửa danh mục món ăn.'));
+    }
+
+    return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddEditProductDialog(),
+        child: const Icon(Icons.add),
+      ),
+      body: ListView.builder(
+        itemCount: products.length,
+        itemBuilder: (context, index) {
+          final p = products[index];
+          return ListTile(
+            title: Text(p['name']),
+            subtitle: Text('Danh mục: ${p['category']} - Giá: ${p['price']}đ\nTopping: ${p['toppings'].length} loại'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  onPressed: () => _showAddEditProductDialog(product: p, index: index),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () {
+                    setState(() {
+                      products.removeAt(index);
+                    });
+                    _logAction("Xóa món ăn: ${p['name']}");
+                    _saveData();
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAddEditProductDialog({Map<String, dynamic>? product, int? index}) {
+    final nameController = TextEditingController(text: product != null ? product['name'] : '');
+    final priceController = TextEditingController(text: product != null ? product['price'].toString() : '');
+    String selectedCategory = product != null ? product['category'] : 'Đồ uống';
+    List<Map<String, dynamic>> localToppings = product != null
+        ? List<Map<String, dynamic>>.from(product['toppings'])
+        : [
+            {'name': 'Trân châu', 'price': 5000.0, 'quantity': 0}
+          ];
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(product == null ? 'Thêm món ăn mới' : 'Chỉnh sửa món ăn'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Tên món')),
+                TextField(
+                    controller: priceController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Giá tiền')),
+                DropdownButton<String>(
+                  value: selectedCategory,
+                  isExpanded: true,
+                  items: ['Đồ uống', 'Món ăn']
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (val) => setDialogState(() => selectedCategory = val!),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Danh sách Topping:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle, color: Colors.green),
+                      onPressed: () {
+                        setDialogState(() {
+                          localToppings.add({'name': 'Topping mới', 'price': 5000.0, 'quantity': 0});
+                        });
+                      },
+                    )
+                  ],
+                ),
+                ...List.generate(localToppings.length, (tIdx) {
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          decoration: const InputDecoration(hintText: 'Tên topping'),
+                          controller: TextEditingController(text: localToppings[tIdx]['name']),
+                          onChanged: (val) => localToppings[tIdx]['name'] = val,
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 5),
+                      SizedBox(
+                        width: 70,
+                        child: TextField(
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(hintText: 'Giá'),
+                          controller: TextEditingController(text: localToppings[tIdx]['price'].toString()),
+                          onChanged: (val) => localToppings[tIdx]['price'] = double.tryParse(val) ?? 0,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle, color: Colors.red),
+                        onPressed: () {
+                          setDialogState(() {
+                            localToppings.removeAt(tIdx);
+                          });
+                        },
+                      )
+                    ],
                   );
-                },
-              ),
+                })
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
+            ElevatedButton(
+              onPressed: () {
+                final newP = {
+                  'id': product != null ? product['id'] : const Uuid().v4(),
+                  'name': nameController.text,
+                  'category': selectedCategory,
+                  'price': double.tryParse(priceController.text) ?? 0,
+                  'toppings': localToppings,
+                };
+                setState(() {
+                  if (index != null) {
+                    products[index] = newP;
+                    _logAction("Sửa thông tin món: ${newP['name']}");
+                  } else {
+                    products.add(newP);
+                    _logAction("Thêm món ăn mới: ${newP['name']}");
+                  }
+                });
+                _saveData();
+                Navigator.pop(context);
+              },
+              child: const Text('Lưu'),
             )
           ],
         ),
       ),
     );
   }
-}
 
-// ------------------- 4. MÀN HÌNH LỊCH SỬ ĐƠN & THAO TÁC -------------------
-class HistoryAndLogsScreen extends StatefulWidget {
-  const HistoryAndLogsScreen({super.key});
+  // 3. MÀN HÌNH QUẢN LÝ DOANH THU & CHI PHÍ LỢI NHUẬN RÒNG
+  Widget _buildFinanceView() {
+    final expenseTitleController = TextEditingController();
+    final expenseAmountController = TextEditingController();
 
-  @override
-  State<HistoryAndLogsScreen> createState() => _HistoryAndLogsScreenState();
-}
-
-class _HistoryAndLogsScreenState extends State<HistoryAndLogsScreen> {
-  List<Map<String, dynamic>> logs = [];
-  List<Map<String, dynamic>> orders = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadData();
-  }
-
-  Future<void> _loadData() async {
-    final l = await LocalStorageService.fetchLogs();
-    final o = await LocalStorageService.fetchOrders();
-    setState(() {
-      logs = List<Map<String, dynamic>>.from(l);
-      orders = List<Map<String, dynamic>>.from(o);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    bool canViewOrders = LocalStorageService.hasPermission('viewOrderHistory');
-    bool canViewLogs = LocalStorageService.hasPermission('viewLogs');
-
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Lịch Sử & Nhật Ký'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Lịch Sử Đơn Hàng'),
-              Tab(text: 'Nhật Ký Thao Tác'),
-            ],
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            color: Colors.blue.shade50,
+            child: ListTile(
+              title: const Text('Doanh thu Hôm nay'),
+              trailing: Text('${todayRevenue.toStringAsFixed(0)}đ',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blue)),
+            ),
           ),
-        ),
-        body: TabBarView(
-          children: [
-            canViewOrders
-                ? ListView.builder(
-                    padding: const EdgeInsets.all(8),
-                    itemCount: orders.length,
-                    itemBuilder: (ctx, idx) {
-                      final order = orders[idx];
-                      return ListTile(
-                        leading: const Icon(Icons.receipt_long, color: Color(0xFF0D9488)),
-                        title: Text('Đơn #${order['id']}'),
-                        subtitle: Text(order['timestamp'].toString().substring(0, 16)),
-                        trailing: Text(formatMoney(double.tryParse(order['total'].toString()) ?? 0),
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                      );
-                    },
-                  )
-                : _buildPermissionDeniedWidget('Quyền xem Lịch Sử Đơn Hàng'),
-            canViewLogs
-                ? ListView.builder(
-                    padding: const EdgeInsets.all(8),
-                    itemCount: logs.length,
-                    itemBuilder: (ctx, idx) {
-                      final log = logs[logs.length - 1 - idx];
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.info_outline, color: Colors.blueGrey),
-                        title: Text(log['detail'] ?? ''),
-                        subtitle: Text(log['time'] ?? ''),
-                      );
-                    },
-                  )
-                : _buildPermissionDeniedWidget('Quyền xem Nhật Ký Thao Tác'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPermissionDeniedWidget(String permName) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.lock_person_outlined, size: 64, color: Colors.orange),
-            const SizedBox(height: 16),
-            Text('Thiết bị chưa được cấp $permName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('Mã thiết bị của bạn là: ${LocalStorageService.myDeviceId}', style: const TextStyle(color: Colors.grey)),
-            const SizedBox(height: 8),
-            const Text('Vui lòng liên hệ Admin để cấp quyền cho thiết bị này.', textAlign: TextAlign.center),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ------------------- 5. MÀN HÌNH ADMIN QUẢN LÝ CẤP QUYỀN -------------------
-class AdminPermissionScreen extends StatefulWidget {
-  const AdminPermissionScreen({super.key});
-
-  @override
-  State<AdminPermissionScreen> createState() => _AdminPermissionScreenState();
-}
-
-class _AdminPermissionScreenState extends State<AdminPermissionScreen> {
-  bool isUnlocked = false;
-  final pinController = TextEditingController();
-  final targetDeviceController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    if (LocalStorageService.hasPermission('isAdmin')) {
-      isUnlocked = true;
-    }
-  }
-
-  void _verifyAdmin() {
-    if (LocalStorageService.verifyMasterCode(pinController.text.trim())) {
-      setState(() => isUnlocked = true);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mã PIN Admin không đúng! (Mã mặc định: 000)'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!isUnlocked) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Quản Lý Phân Quyền')),
-        body: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Card(
+            color: Colors.purple.shade50,
+            child: ListTile(
+              title: const Text('Doanh thu Tháng này'),
+              trailing: Text('${monthRevenue.toStringAsFixed(0)}đ',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.purple)),
+            ),
+          ),
+          Card(
+            color: Colors.green.shade50,
+            child: ListTile(
+              title: const Text('Lợi nhuận ròng (Doanh thu - Chi phí)'),
+              trailing: Text('${netProfitToday.toStringAsFixed(0)}đ',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Icon(Icons.admin_panel_settings, size: 72, color: Color(0xFF0D9488)),
-              const SizedBox(height: 16),
-              const Text('Nhập Mã PIN Admin (Mã mặc định 000) để vào Bảng Cấp Quyền:',
-                  textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              TextField(
-                controller: pinController,
-                keyboardType: TextInputType.number,
-                obscureText: true,
-                maxLength: 4,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 24, letterSpacing: 8),
-                decoration: const InputDecoration(hintText: '***'),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0D9488),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(48),
-                ),
-                onPressed: _verifyAdmin,
-                child: const Text('MỞ KHÓA ADMIN'),
-              ),
+              const Text('Ghi chú Chi phí / Tiêu dùng:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              if (currentUserRole == 'Admin')
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.add),
+                  label: const Text('Thêm chi phí'),
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Thêm khoản chi'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextField(
+                                controller: expenseTitleController,
+                                decoration: const InputDecoration(labelText: 'Tiêu vào việc gì')),
+                            TextField(
+                                controller: expenseAmountController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(labelText: 'Số tiền chi')),
+                          ],
+                        ),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
+                          ElevatedButton(
+                            onPressed: () {
+                              final amount = double.tryParse(expenseAmountController.text) ?? 0;
+                              if (amount > 0) {
+                                setState(() {
+                                  expenses.add({
+                                    'title': expenseTitleController.text,
+                                    'amount': amount,
+                                    'time': DateTime.now().toString().substring(0, 19)
+                                  });
+                                });
+                                _logAction("Thêm chi phí: ${expenseTitleController.text} - $amount đ");
+                                _saveData();
+                              }
+                              Navigator.pop(context);
+                            },
+                            child: const Text('Lưu'),
+                          )
+                        ],
+                      ),
+                    );
+                  },
+                )
             ],
           ),
-        ),
-      );
-    }
-
-    final allPermissions = LocalStorageService.getAllPermissions();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Bảng Cấp Quyền Bằng Device ID'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.lock),
-            onPressed: () => setState(() => isUnlocked = false),
+          Expanded(
+            child: ListView.builder(
+              itemCount: expenses.length,
+              itemBuilder: (context, index) {
+                final ex = expenses[index];
+                return ListTile(
+                  title: Text(ex['title']),
+                  subtitle: Text(ex['time']),
+                  trailing: Text('-${ex['amount'].toStringAsFixed(0)}đ', style: const TextStyle(color: Colors.red)),
+                );
+              },
+            ),
           )
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(8)),
-              child: Row(
-                children: [
-                  const Icon(Icons.phone_android, color: Color(0xFF0D9488)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text('Mã Định Danh Máy Này: ${LocalStorageService.myDeviceId}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text('Danh Sách Các Thiết Bị Đã Được Cấp Quyền:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            ...allPermissions.entries.map((entry) {
-              String devId = entry.key;
-              Map<String, bool> perms = entry.value;
+    );
+  }
 
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Mã Thiết Bị: $devId',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0D9488))),
-                          if (devId == LocalStorageService.myDeviceId)
-                            const Chip(label: Text('Máy này'), backgroundColor: Color(0xFFCCFBF1))
-                        ],
-                      ),
-                      const Divider(),
-                      SwitchListTile(
-                        dense: true,
-                        title: const Text('Quyền Xem Lịch Sử Đơn Hàng'),
-                        value: perms['viewOrderHistory'] ?? false,
-                        onChanged: (val) => setState(() => LocalStorageService.togglePermission(devId, 'viewOrderHistory', val)),
-                      ),
-                      SwitchListTile(
-                        dense: true,
-                        title: const Text('Quyền Xem Nhật Ký Thao Tác'),
-                        value: perms['viewLogs'] ?? false,
-                        onChanged: (val) => setState(() => LocalStorageService.togglePermission(devId, 'viewLogs', val)),
-                      ),
-                      SwitchListTile(
-                        dense: true,
-                        title: const Text('Quyền Quản Lý Món (Tạo/Sửa/Xóa)'),
-                        value: perms['createItem'] ?? false,
-                        onChanged: (val) => setState(() => LocalStorageService.togglePermission(devId, 'createItem', val)),
-                      ),
-                      SwitchListTile(
-                        dense: true,
-                        title: const Text('Quyền Admin (Toàn Quyền)'),
-                        value: perms['isAdmin'] ?? false,
-                        onChanged: (val) => setState(() => LocalStorageService.togglePermission(devId, 'isAdmin', val)),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-            const SizedBox(height: 16),
-            const Divider(),
-            const Text('Cấp Quyền Cho Thiết Bị Mới Bằng Mã Device ID:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Row(
+  // 4. MÀN HÌNH QUẢN LÝ NHẬT KÝ (LOGS)
+  Widget _buildLogsView() {
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: const TabBar(
+          tabs: [
+            Tab(text: 'Nhật ký thao tác'),
+            Tab(text: 'Nhật ký đơn hàng'),
+            Tab(text: 'Lịch sử doanh thu'),
+          ],
+        ),
+        body: TabBarView(
+          children: [
+            // Nhật ký thao tác
+            ListView.builder(
+              itemCount: actionLogs.length,
+              itemBuilder: (context, index) {
+                final log = actionLogs[index];
+                return ListTile(
+                  title: Text(log['action']),
+                  subtitle: Text('${log['time']} | Người thực hiện: ${log['user']}'),
+                );
+              },
+            ),
+
+            // Nhật ký đơn hàng
+            ListView.builder(
+              itemCount: orderLogs.length,
+              itemBuilder: (context, index) {
+                final order = orderLogs[index];
+                return ListTile(
+                  title: Text('Đơn #${order['orderId']} - Tổng: ${order['total'].toStringAsFixed(0)}đ'),
+                  subtitle: Text('Thời gian: ${order['time']}'),
+                );
+              },
+            ),
+
+            // Nhật ký doanh thu ngày và tháng
+            ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: targetDeviceController,
-                    decoration: const InputDecoration(
-                      hintText: 'Nhập mã ví dụ: DEV-9999',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488), foregroundColor: Colors.white),
-                  onPressed: () {
-                    String newDevId = targetDeviceController.text.trim();
-                    if (newDevId.isNotEmpty) {
-                      setState(() {
-                        LocalStorageService.togglePermission(newDevId, 'viewOrderHistory', true);
-                        targetDeviceController.clear();
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Đã khởi tạo và cấp quyền cho thiết bị $newDevId')),
-                      );
-                    }
-                  },
-                  child: const Text('Thêm Máy'),
-                )
+                const Text('Doanh thu các ngày trước:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ...dailyRevenueLogs.map((d) => ListTile(
+                      title: Text('Ngày: ${d['date']}'),
+                      trailing: Text('${d['amount'].toStringAsFixed(0)}đ', style: const TextStyle(color: Colors.blue)),
+                    )),
+                const Divider(),
+                const Text('Doanh thu các tháng trước:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ...monthlyRevenueLogs.map((m) => ListTile(
+                      title: Text('Tháng: ${m['month']}'),
+                      trailing: Text('${m['amount'].toStringAsFixed(0)}đ', style: const TextStyle(color: Colors.purple)),
+                    )),
               ],
             )
           ],
@@ -1529,4 +834,3 @@ class _AdminPermissionScreenState extends State<AdminPermissionScreen> {
     );
   }
 }
-
