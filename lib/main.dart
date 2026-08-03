@@ -179,8 +179,10 @@ class MyApp extends StatelessWidget {
           centerTitle: false,
           elevation: 0,
         ),
-        cardTheme: CardTheme(
+        // Sửa lỗi triệt để: Sử dụng CardThemeData chuẩn tương thích mọi phiên bản Flutter
+        cardTheme: CardThemeData(
           elevation: 0,
+          color: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: const BorderSide(color: Color(0xFFE2E8F0)),
