@@ -102,8 +102,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   String currentRole = 'Admin';
   bool isOnlineMode = true;
 
+  // Danh mục & Đơn vị tính (Có thể thêm mới)
   List<String> categories = ['Tất cả', 'Đồ Ăn', 'Đồ Uống', 'Đồ Cân'];
-  List<String> units = ['tô', 'dĩa', 'ly', 'kg', 'g', 'phần'];
+  List<String> units = ['tô', 'dĩa', 'ly', 'kg', 'g', 'phần', 'chai', 'lon'];
   String selectedCategory = 'Tất cả';
 
   List<MenuItem> menuItems = [
@@ -158,7 +159,29 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _loadCustomCategoriesAndUnits();
     _checkAndResetRevenue();
+  }
+
+  // Tải danh mục & đơn vị tính từ bộ nhớ
+  Future<void> _loadCustomCategoriesAndUnits() async {
+    final prefs = await SharedPreferences.getInstance();
+    List<String>? savedCats = prefs.getStringList('saved_categories');
+    List<String>? savedUnits = prefs.getStringList('saved_units');
+
+    if (savedCats != null && savedCats.isNotEmpty) {
+      setState(() => categories = savedCats);
+    }
+    if (savedUnits != null && savedUnits.isNotEmpty) {
+      setState(() => units = savedUnits);
+    }
+  }
+
+  // Lưu danh mục & đơn vị tính vào bộ nhớ
+  Future<void> _saveCustomCategoriesAndUnits() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('saved_categories', categories);
+    await prefs.setStringList('saved_units', units);
   }
 
   Future<void> _checkAndResetRevenue() async {
@@ -209,14 +232,88 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  // Quản lý tạo/sửa món ăn
+  // HỘP THOẠI TẠO DANH MỤC MỚI
+  void _showAddCategoryDialog([Function(String)? onCategoryAdded]) {
+    final catCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Thêm Danh Mục Mới'),
+        content: TextField(
+          controller: catCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Tên danh mục (VD: Tráng Miệng, Sinh Tố)'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          ElevatedButton(
+            onPressed: () {
+              String name = catCtrl.text.trim();
+              if (name.isNotEmpty) {
+                if (!categories.contains(name)) {
+                  setState(() {
+                    categories.add(name);
+                  });
+                  _saveCustomCategoriesAndUnits();
+                  _addLog("Đã thêm danh mục mới: $name");
+                  if (onCategoryAdded != null) onCategoryAdded(name);
+                }
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Thêm'),
+          )
+        ],
+      ),
+    );
+  }
+
+  // HỘP THOẠI TẠO ĐƠN VỊ TÍNH MỚI
+  void _showAddUnitDialog([Function(String)? onUnitAdded]) {
+    final unitCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Thêm Đơn Vị Tính Mới'),
+        content: TextField(
+          controller: unitCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Tên đơn vị (VD: hũ, chai, phần lớn)'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+          ElevatedButton(
+            onPressed: () {
+              String name = unitCtrl.text.trim();
+              if (name.isNotEmpty) {
+                if (!units.contains(name)) {
+                  setState(() {
+                    units.add(name);
+                  });
+                  _saveCustomCategoriesAndUnits();
+                  _addLog("Đã thêm đơn vị tính mới: $name");
+                  if (onUnitAdded != null) onUnitAdded(name);
+                }
+                Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Thêm'),
+          )
+        ],
+      ),
+    );
+  }
+
+  // QUẢN LÝ TẠO/SỬA MÓN ĂN
   void _showAddEditItemDialog({MenuItem? itemToEdit}) {
     final nameCtrl = TextEditingController(text: itemToEdit?.name ?? '');
     final priceCtrl = TextEditingController(text: itemToEdit?.basePrice.toString() ?? '');
+    
     String cat = itemToEdit?.category ?? (categories.length > 1 ? categories[1] : 'Đồ Ăn');
-    String unit = itemToEdit?.unit ?? 'tô';
+    String unit = itemToEdit?.unit ?? units.first;
     bool isAvail = itemToEdit?.isAvailable ?? true;
     String? imagePath = itemToEdit?.imagePath;
+    
     List<ProductVariant> currentVariants = itemToEdit != null ? List.from(itemToEdit.variants) : [];
     List<ToppingItem> currentToppings = itemToEdit != null ? List.from(itemToEdit.toppings) : [];
 
@@ -245,33 +342,62 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Tên món chính (VD: Bún Riêu)')),
                 TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá mặc định (VNĐ)')),
+                
+                const SizedBox(height: 10),
+                // LỰA CHỌN DANH MỤC + NÚT TẠO MỚI
                 Row(
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: cat,
+                        value: categories.contains(cat) ? cat : categories.where((c) => c != 'Tất cả').first,
                         items: categories.where((c) => c != 'Tất cả').map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
                         onChanged: (v) => setDlgState(() => cat = v!),
                         decoration: const InputDecoration(labelText: 'Danh mục'),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, color: Colors.teal),
+                      tooltip: 'Tạo danh mục mới',
+                      onPressed: () {
+                        _showAddCategoryDialog((newCat) {
+                          setDlgState(() => cat = newCat);
+                        });
+                      },
+                    )
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+                // LỰA CHỌN ĐƠN VỊ TÍNH + NÚT TẠO MỚI
+                Row(
+                  children: [
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        value: unit,
+                        value: units.contains(unit) ? unit : units.first,
                         items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
                         onChanged: (v) => setDlgState(() => unit = v!),
                         decoration: const InputDecoration(labelText: 'Đơn vị tính'),
                       ),
                     ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline, color: Colors.teal),
+                      tooltip: 'Tạo đơn vị tính mới',
+                      onPressed: () {
+                        _showAddUnitDialog((newUnit) {
+                          setDlgState(() => unit = newUnit);
+                        });
+                      },
+                    )
                   ],
                 ),
+
                 SwitchListTile(
                   title: const Text('Đang kinh doanh'),
                   value: isAvail,
                   onChanged: (v) => setDlgState(() => isAvail = v),
                 ),
                 const Divider(),
+                
                 // TẠO BIẾN THỂ MÓN
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -296,6 +422,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       ],
                     )),
                 const Divider(),
+                
                 // TẠO ĐỒ GỌI THÊM / TOPPING
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -823,33 +950,63 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               child: const Icon(Icons.add),
             )
           : null,
-      body: ListView.builder(
-        itemCount: menuItems.length,
-        itemBuilder: (c, i) {
-          final item = menuItems[i];
-          return ListTile(
-            leading: item.imagePath != null
-                ? Image.file(File(item.imagePath!), width: 50, height: 50, fit: BoxFit.cover)
-                : const Icon(Icons.fastfood),
-            title: Text(item.name),
-            subtitle: Text('Giá: ${item.basePrice.toStringAsFixed(0)}đ / ${item.unit} | Biến thể: ${item.variants.length} | Topping: ${item.toppings.length}'),
-            trailing: currentRole == 'Admin'
-                ? Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () => _showAddEditItemDialog(itemToEdit: item)),
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => setState(() {
-                          menuItems.removeAt(i);
-                          _addLog("Đã xóa món ${item.name}");
-                        }),
-                      ),
-                    ],
-                  )
-                : null,
-          );
-        },
+      body: Column(
+        children: [
+          if (currentRole == 'Admin')
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showAddCategoryDialog(),
+                      icon: const Icon(Icons.category, size: 18),
+                      label: const Text('+ Thêm Danh Mục'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _showAddUnitDialog(),
+                      icon: const Icon(Icons.square_foot, size: 18),
+                      label: const Text('+ Thêm Đơn Vị'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: menuItems.length,
+              itemBuilder: (c, i) {
+                final item = menuItems[i];
+                return ListTile(
+                  leading: item.imagePath != null
+                      ? Image.file(File(item.imagePath!), width: 50, height: 50, fit: BoxFit.cover)
+                      : const Icon(Icons.fastfood),
+                  title: Text(item.name),
+                  subtitle: Text('Loại: ${item.category} | Giá: ${item.basePrice.toStringAsFixed(0)}đ / ${item.unit}\nBiến thể: ${item.variants.length} | Topping: ${item.toppings.length}'),
+                  isThreeLine: true,
+                  trailing: currentRole == 'Admin'
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () => _showAddEditItemDialog(itemToEdit: item)),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => setState(() {
+                                menuItems.removeAt(i);
+                                _addLog("Đã xóa món ${item.name}");
+                              }),
+                            ),
+                          ],
+                        )
+                      : null,
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
