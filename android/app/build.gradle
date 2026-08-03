@@ -1,14 +1,13 @@
 plugins {
     id "com.android.application"
     id "kotlin-android"
-    // Flutter Gradle Plugin
     id "dev.flutter.flutter-gradle-plugin"
 }
 
 def localProperties = new Properties()
 def localPropertiesFile = rootProject.file('local.properties')
 if (localPropertiesFile.exists()) {
-    localPropertiesFile.reader('UTF-8').withReader { reader ->
+    localPropertiesFile.withReader('UTF-8') { reader ->
         localProperties.load(reader)
     }
 }
@@ -38,27 +37,17 @@ android {
     }
 
     defaultConfig {
-        // Thay đổi ID ứng dụng của bạn nếu có
         applicationId "com.example.app_tinh_tien"
-        
-        // ========================================================
-        // 1. CẬP NHẬT minSdkVersion TẠI ĐÂY (Sửa thành 21 hoặc 23)
-        // ========================================================
         minSdkVersion 21
-        
         targetSdkVersion flutter.targetSdkVersion
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
 
-        // ========================================================
-        // 2. BẬT MULTIDEX ĐỂ TRÁNH LỖI KHI DÙNG FIREBASE
-        // ========================================================
         multiDexEnabled true
     }
 
     buildTypes {
         release {
-            // Cấu hình chữ ký debug cho bản release (hoặc cấu hình keystore của bạn)
             signingConfig signingConfigs.debug
             minifyEnabled false
             shrinkResources false
@@ -71,6 +60,5 @@ flutter {
 }
 
 dependencies {
-    // Thư viện hỗ trợ MultiDex cho Android
     implementation 'androidx.multidex:multidex:2.0.1'
 }
