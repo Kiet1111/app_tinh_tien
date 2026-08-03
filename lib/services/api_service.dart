@@ -11,7 +11,7 @@ class LocalStorageService {
 
   static final _uuid = const Uuid();
 
-  // Menu mặc định có chứa Danh mục (category) và Biến thể món (variants)
+  // Menu mặc định hoạt động Offline
   static final List<Map<String, dynamic>> _defaultMenu = [
     {
       'id': '1',
@@ -22,6 +22,11 @@ class LocalStorageService {
         {'name': 'Cháo 10.000đ', 'price': 10000.0},
         {'name': 'Cháo 20.000đ', 'price': 20000.0},
         {'name': 'Cháo xương', 'price': 35000.0},
+      ],
+      'toppings': [
+        {'name': 'Trứng gà', 'price': 5000.0},
+        {'name': 'Quẩy', 'price': 5000.0},
+        {'name': 'Thêm thịt', 'price': 10000.0},
       ]
     },
     {
@@ -33,33 +38,15 @@ class LocalStorageService {
         {'name': 'Coca Cola', 'price': 15000.0},
         {'name': 'Pepsi', 'price': 15000.0},
         {'name': 'Sting đỏ', 'price': 15000.0},
-        {'name': '7Up', 'price': 15000.0},
-      ]
-    },
-    {
-      'id': '3',
-      'name': 'Hủ tiếu',
-      'category': 'Món ăn',
-      'price': 30000.0,
-      'variants': [
-        {'name': 'Tô Thường', 'price': 30000.0},
-        {'name': 'Tô Đặc Biệt', 'price': 40000.0},
-      ]
-    },
-    {
-      'id': '4',
-      'name': 'Cà phê',
-      'category': 'Nước uống',
-      'price': 15000.0,
-      'variants': [
-        {'name': 'Cà phê đen', 'price': 15000.0},
-        {'name': 'Cà phê sữa', 'price': 20000.0},
+      ],
+      'toppings': [
+        {'name': 'Thêm đá', 'price': 0.0},
+        {'name': 'Ít đường', 'price': 0.0},
       ]
     },
   ];
 
-  // ---------------- QUẢN LÝ MENU ----------------
-
+  // 1. CHẾ ĐỘ OFFLINE & QUẢN LÝ MENU
   static Future<List<Map<String, dynamic>>> fetchMenu() async {
     final prefs = await SharedPreferences.getInstance();
     final String? menuJson = prefs.getString(_keyMenu);
@@ -79,8 +66,7 @@ class LocalStorageService {
 
   static Future<bool> saveMenu(List<Map<String, dynamic>> menu) async {
     final prefs = await SharedPreferences.getInstance();
-    String encoded = jsonEncode(menu);
-    return await prefs.setString(_keyMenu, encoded);
+    return await prefs.setString(_keyMenu, jsonEncode(menu));
   }
 
   static Future<bool> addMenuItem({
@@ -88,19 +74,23 @@ class LocalStorageService {
     required String category,
     required double defaultPrice,
     required List<Map<String, dynamic>> variants,
+    required List<Map<String, dynamic>> toppings,
   }) async {
     List<Map<String, dynamic>> currentMenu = await fetchMenu();
     String newId = _uuid.v4();
+
     currentMenu.add({
       'id': newId,
       'name': name,
-      'category': category.isEmpty ? 'Khác' : category,
+      'category': category.isEmpty ? 'Món khác' : category,
       'price': defaultPrice,
       'variants': variants,
+      'toppings': toppings,
     });
+
     bool success = await saveMenu(currentMenu);
     if (success) {
-      await addLog('ADMIN_ADD_ITEM', 'Thêm món mới: $name (Danh mục: $category)');
+      await addLog('ADMIN_ADD_ITEM', 'Thêm món: $name [$category]');
     }
     return success;
   }
@@ -113,13 +103,43 @@ class LocalStorageService {
     currentMenu.removeWhere((item) => item['id'] == id);
     bool success = await saveMenu(currentMenu);
     if (success) {
-      await addLog('ADMIN_DELETE_ITEM', 'Xóa món: $itemName');
+      await addLog('ADMIN_DELETE_ITEM', 'Xóa món khỏi Menu: $itemName');
     }
     return success;
   }
 
-  // ---------------- QUẢN LÝ ĐƠN HÀNG & LOGS ----------------
+  // 2. NHẬT KÝ THAO TÁC (AUDIT LOGS)
+  static Future<void> addLog(String actionType, String detail) async {
+    final prefs = await SharedPreferences.getInstance();
+    List<Map<String, dynamic>> currentLogs = await fetchLogs();
 
+    currentLogs.add({
+      'time': DateTime.now().toString().substring(0, 19),
+      'type': actionType,
+      'detail': detail,
+    });
+
+    if (currentLogs.length > 200) {
+      currentLogs = currentLogs.sublist(currentLogs.length - 200);
+    }
+
+    await prefs.setString(_keyLogs, jsonEncode(currentLogs));
+  }
+
+  static Future<List<Map<String, dynamic>>> fetchLogs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? logsJson = prefs.getString(_keyLogs);
+    if (logsJson == null || logsJson.isEmpty) return [];
+
+    try {
+      List<dynamic> decoded = jsonDecode(logsJson);
+      return decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // 3. LƯU ĐƠN HÀNG OFFLINE
   static Future<List<Map<String, dynamic>>> fetchOrders() async {
     final prefs = await SharedPreferences.getInstance();
     final String? ordersJson = prefs.getString(_keyOrders);
@@ -141,42 +161,10 @@ class LocalStorageService {
     currentOrders.add(orderData);
 
     bool success = await prefs.setString(_keyOrders, jsonEncode(currentOrders));
-
     if (success) {
       double total = double.tryParse(orderData['total'].toString()) ?? 0.0;
-      await addLog('NEW_ORDER', 'Thanh toán đơn #${orderData['id']} - Tổng: ${total.toStringAsFixed(0)}đ');
+      await addLog('PAYMENT', 'Thanh toán đơn #${orderData['id']} - ${total.toStringAsFixed(0)}đ');
     }
     return success;
   }
-
-  static Future<void> addLog(String actionType, String detail) async {
-    final prefs = await SharedPreferences.getInstance();
-    List<Map<String, dynamic>> currentLogs = await fetchLogs();
-
-    currentLogs.add({
-      'time': DateTime.now().toString().substring(0, 19),
-      'type': actionType,
-      'detail': detail,
-    });
-
-    if (currentLogs.length > 200) {
-      currentLogs = currentLogs.sublist(currentLogs.length - 200);
-    }
-
-    prefs.setString(_keyLogs, jsonEncode(currentLogs));
-  }
-
-  static Future<List<Map<String, dynamic>>> fetchLogs() async {
-    final prefs = await SharedPreferences.getInstance();
-    final String? logsJson = prefs.getString(_keyLogs);
-    if (logsJson == null || logsJson.isEmpty) return [];
-
-    try {
-      List<dynamic> decoded = jsonDecode(logsJson);
-      return decoded.map((e) => Map<String, dynamic>.from(e)).toList();
-    } catch (e) {
-      return [];
-    }
-  }
 }
-
