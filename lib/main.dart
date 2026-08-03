@@ -1,9 +1,11 @@
 // lib/main.dart
 
+import 'dart:math';
 import 'package:flutter/material.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await LocalStorageService.initDeviceId();
   runApp(const MyApp());
 }
 
@@ -14,17 +16,60 @@ String formatMoney(double amount) {
   return '${str.replaceAllMapped(reg, (Match m) => '${m[1]}.')}đ';
 }
 
-// ------------------- LOCAL STORAGE & LOGIC DỮ LIỆU -------------------
+// ------------------- QUẢN LÝ DỮ LIỆU & PHÂN QUYỀN -------------------
 class LocalStorageService {
-  static const String masterCode = "000"; // Mã PIN master mặc định
-  static bool isUnlocked = false; // Trạng thái đã xác thực mã PIN hay chưa
+  static const String masterCode = "000"; // Mã PIN Master
+  static String myDeviceId = ""; // Mã định danh của thiết bị hiện tại
 
-  static final List<String> _categories = [
-    'Tất cả',
-    'Đồ Uống',
-    'Đồ Ăn',
-    'Đồ Cân',
-  ];
+  // Khởi tạo Mã Định Danh cho thiết bị
+  static Future<void> initDeviceId() async {
+    if (myDeviceId.isEmpty) {
+      final random = Random();
+      int code = 1000 + random.nextInt(9000);
+      myDeviceId = "DEV-$code";
+    }
+    // Mặc định cấp full quyền cho máy đầu tiên để tiện thử nghiệm
+    if (!_devicePermissions.containsKey(myDeviceId)) {
+      _devicePermissions[myDeviceId] = {
+        'viewOrderHistory': true,
+        'viewLogs': true,
+        'createItem': true,
+        'isAdmin': true,
+      };
+    }
+  }
+
+  // Cấu trúc lưu trữ quyền theo Mã Định Danh Thiết Bị (Device ID)
+  static final Map<String, Map<String, bool>> _devicePermissions = {};
+
+  // Kiểm tra thiết bị có quyền cụ thể hay không
+  static bool hasPermission(String permKey, {String? deviceId}) {
+    String targetDev = deviceId ?? myDeviceId;
+    var perms = _devicePermissions[targetDev];
+    if (perms == null) return false;
+    // Nếu có quyền Admin thì tự động có tất cả các quyền khác
+    if (perms['isAdmin'] == true) return true;
+    return perms[permKey] == true;
+  }
+
+  // Admin Cấp hoặc Thu hồi quyền của một Device ID
+  static void togglePermission(String targetDeviceId, String permKey, bool value) {
+    if (!_devicePermissions.containsKey(targetDeviceId)) {
+      _devicePermissions[targetDeviceId] = {
+        'viewOrderHistory': false,
+        'viewLogs': false,
+        'createItem': false,
+        'isAdmin': false,
+      };
+    }
+    _devicePermissions[targetDeviceId]![permKey] = value;
+    _addLog('Admin đã ${value ? "cấp" : "thu hồi"} quyền [$permKey] cho thiết bị $targetDeviceId');
+  }
+
+  static Map<String, Map<String, bool>> getAllPermissions() => _devicePermissions;
+
+  // --- DỮ LIỆU THỰC ĐƠN & ĐƠN HÀNG ---
+  static final List<String> _categories = ['Tất cả', 'Đồ Uống', 'Đồ Ăn', 'Đồ Cân'];
 
   static final List<Map<String, dynamic>> _menuList = [
     {
@@ -34,10 +79,9 @@ class LocalStorageService {
       'price': 25000.0,
       'unit': 'ly',
       'stock': 50.0,
-      'variants': [],
       'toppings': [
-        {'name': 'Trân châu đen', 'price': 5000.0, 'qty': 0},
-        {'name': 'Kem cheese', 'price': 10000.0, 'qty': 0},
+        {'name': 'Trân châu đen', 'price': 5000.0},
+        {'name': 'Kem cheese', 'price': 10000.0},
       ]
     },
     {
@@ -47,10 +91,9 @@ class LocalStorageService {
       'price': 30000.0,
       'unit': 'ly',
       'stock': 40.0,
-      'variants': [],
       'toppings': [
-        {'name': 'Trân châu 3Q', 'price': 5000.0, 'qty': 0},
-        {'name': 'Pudding trứng', 'price': 7000.0, 'qty': 0},
+        {'name': 'Trân châu 3Q', 'price': 5000.0},
+        {'name': 'Pudding trứng', 'price': 7000.0},
       ]
     },
     {
@@ -60,65 +103,29 @@ class LocalStorageService {
       'price': 60000.0,
       'unit': 'kg',
       'stock': 10.0,
-      'variants': [],
       'toppings': []
     },
   ];
 
   static final List<Map<String, dynamic>> _orders = [];
-  static final List<Map<String, dynamic>> _expenses = [];
   static final List<Map<String, dynamic>> _logs = [
     {
-      'detail': 'Khởi động ứng dụng POS thành công',
+      'detail': 'Khởi động ứng dụng POS - Thiết bị: $myDeviceId',
       'time': DateTime.now().toString().substring(0, 16),
-      'type': 'system'
     }
   ];
 
-  // Danh mục
   static Future<List<String>> fetchCategories() async => List<String>.from(_categories);
-  
-  static Future<void> addCategory(String name) async {
-    if (!_categories.contains(name)) {
-      _categories.add(name);
-      _addLog('Thêm danh mục mới: $name');
-    }
-  }
-
-  static Future<void> deleteCategory(String name) async {
-    if (name != 'Tất cả') {
-      _categories.remove(name);
-      _addLog('Xóa danh mục: $name');
-    }
-  }
-
-  // Thực đơn
   static Future<List<Map<String, dynamic>>> fetchMenu() async => List<Map<String, dynamic>>.from(_menuList);
 
+  // THÊM MÓN (Cần quyền hoặc mã PIN)
   static Future<void> addMenuItem(Map<String, dynamic> item) async {
     item['id'] = DateTime.now().millisecondsSinceEpoch.toString();
     _menuList.add(item);
-    _addLog('Thêm món mới: ${item['name']}');
+    _addLog('Tạo món mới: ${item['name']} bởi $myDeviceId');
   }
 
-  static Future<void> updateMenuItem(Map<String, dynamic> item) async {
-    int idx = _menuList.indexWhere((e) => e['id'].toString() == item['id'].toString());
-    if (idx != -1) {
-      _menuList[idx] = item;
-      _addLog('Cập nhật món: ${item['name']}');
-    }
-  }
-
-  static Future<void> deleteMenuItem(String id) async {
-    int idx = _menuList.indexWhere((e) => e['id'].toString() == id);
-    if (idx != -1) {
-      String name = _menuList[idx]['name'];
-      _menuList.removeAt(idx);
-      _addLog('Xóa món: $name');
-    }
-  }
-
-  // Đơn hàng & Chốt ngày
+  // TẠO ĐƠN HÀNG (Không cần mã PIN)
   static Future<bool> saveOrder(Map<String, dynamic> order) async {
     _orders.add(order);
     List items = order['items'] ?? [];
@@ -131,45 +138,30 @@ class LocalStorageService {
         _menuList[idx]['stock'] = (currentStock - qty) < 0 ? 0.0 : (currentStock - qty);
       }
     }
-    _addLog('Tạo đơn hàng #${order['id']} - Tổng: ${formatMoney(order['total'] ?? 0)}');
+    _addLog('Tạo đơn #${order['id']} (${formatMoney(order['total'] ?? 0)})');
     return true;
   }
 
-  static Future<List<Map<String, dynamic>>> fetchOrders() async => List<Map<String, dynamic>>.from(_orders);
-
-  static Future<List<Map<String, dynamic>>> fetchExpenses() async => List<Map<String, dynamic>>.from(_expenses);
-
-  static Future<void> addExpense(String category, double amount, String note) async {
-    _expenses.add({
-      'category': category,
-      'amount': amount,
-      'note': note,
-      'timestamp': DateTime.now().toIso8601String(),
-    });
-    _addLog('Chi phí phát sinh [$category]: ${formatMoney(amount)}');
+  // XÓA ĐƠN HÀNG (Không cần mã PIN)
+  static Future<void> deleteOrder(String orderId) async {
+    _orders.removeWhere((o) => o['id'].toString() == orderId.toString());
+    _addLog('Đã xóa đơn hàng #$orderId');
   }
 
+  static Future<List<Map<String, dynamic>>> fetchOrders() async => List<Map<String, dynamic>>.from(_orders);
   static Future<List<Map<String, dynamic>>> fetchLogs() async => List<Map<String, dynamic>>.from(_logs);
 
   static void _addLog(String detail) {
     _logs.add({
       'detail': detail,
       'time': DateTime.now().toString().substring(0, 16),
-      'type': 'order_op'
     });
   }
 
-  // Xác thực mã PIN security
-  static bool verifyCode(String code) {
-    if (code == masterCode) {
-      isUnlocked = true;
-      return true;
-    }
-    return false;
-  }
+  static bool verifyMasterCode(String code) => code == masterCode;
 }
 
-// ------------------- CẤU HÌNH GIAO DIỆN CHÍNH -------------------
+// ------------------- GIAO DIỆN CHÍNH -------------------
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -177,7 +169,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'POS Bán Hàng & Chốt Lợi Nhuận',
+      title: 'POS Phân Quyền Thiết Bị',
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -213,7 +205,8 @@ class _MainTabScreenState extends State<MainTabScreen> {
     const HomeScreen(),
     const MenuManagementScreen(),
     const EndOfDayReportScreen(),
-    const SecureLogsScreen(),
+    const HistoryAndLogsScreen(),
+    const AdminPermissionScreen(),
   ];
 
   @override
@@ -238,12 +231,17 @@ class _MainTabScreenState extends State<MainTabScreen> {
           NavigationDestination(
             icon: Icon(Icons.point_of_sale_outlined),
             selectedIcon: Icon(Icons.point_of_sale, color: Color(0xFF0D9488)),
-            label: 'Chốt Ngày',
+            label: 'Lợi Nhuận',
           ),
           NavigationDestination(
-            icon: Icon(Icons.security_outlined),
-            selectedIcon: Icon(Icons.security, color: Color(0xFF0D9488)),
-            label: 'Nhật Ký (PIN)',
+            icon: Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history, color: Color(0xFF0D9488)),
+            label: 'Lịch Sử',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.admin_panel_settings_outlined),
+            selectedIcon: Icon(Icons.admin_panel_settings, color: Color(0xFF0D9488)),
+            label: 'Cấp Quyền',
           ),
         ],
       ),
@@ -251,7 +249,7 @@ class _MainTabScreenState extends State<MainTabScreen> {
   }
 }
 
-// ------------------- 1. MÀN HÌNH BÁN HÀNG (+/- TOPPING) -------------------
+// ------------------- 1. MÀN HÌNH BÁN HÀNG (+/- TOPPING, KHÔNG CẦN PIN) -------------------
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -295,8 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
   }
 
-  double get totalAmount => currentOrder.fold(
-      0.0, (sum, item) => sum + (item['totalPrice'] as double));
+  double get totalAmount => currentOrder.fold(0.0, (sum, item) => sum + (item['totalPrice'] as double));
 
   void _openQuantityModal(Map<String, dynamic> dish) {
     String unit = dish['unit']?.toString().toLowerCase() ?? 'phần';
@@ -318,14 +315,11 @@ class _HomeScreenState extends State<HomeScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
-            double toppingTotal = toppingList.fold(0.0, (sum, t) {
-              return sum + (t['price'] as double) * (t['qty'] as int);
-            });
+            double toppingTotal = toppingList.fold(0.0, (sum, t) => sum + (t['price'] as double) * (t['qty'] as int));
 
             double calculatedQty = 1.0;
             if (isWeightUnit) {
@@ -355,14 +349,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Expanded(
-                          child: Text(dish['name'],
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          child: Text(dish['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                         ),
                         Text('${formatMoney(baseUnitPrice)} / $unit',
-                            style: const TextStyle(
-                                color: Color(0xFF0D9488),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16)),
+                            style: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold, fontSize: 16)),
                       ],
                     ),
                     const Divider(height: 20),
@@ -432,10 +422,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
 
-                    // PHẦN CỘNG TRỪ SỐ LƯỢNG TOPPING
                     if (toppingList.isNotEmpty) ...[
                       const SizedBox(height: 16),
-                      const Text('Chọn Topping (Tăng / Giảm):',
+                      const Text('Chọn Topping (+ / -):',
                           style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
                       const SizedBox(height: 8),
                       ...toppingList.map((t) {
@@ -444,18 +433,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('${t['name']} (+${formatMoney(t['price'])})',
-                                  style: const TextStyle(fontSize: 14)),
+                              Text('${t['name']} (+${formatMoney(t['price'])})'),
                               Row(
                                 children: [
                                   IconButton(
                                     icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 22),
-                                    onPressed: t['qty'] > 0
-                                        ? () => setModalState(() => t['qty']--)
-                                        : null,
+                                    onPressed: t['qty'] > 0 ? () => setModalState(() => t['qty']--) : null,
                                   ),
-                                  Text('${t['qty']}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                  Text('${t['qty']}', style: const TextStyle(fontWeight: FontWeight.bold)),
                                   IconButton(
                                     icon: const Icon(Icons.add_circle_outline, color: Colors.green, size: 22),
                                     onPressed: () => setModalState(() => t['qty']++),
@@ -524,6 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // TẠO ĐƠN HÀNG - KHÔNG YÊU CẦU MÃ PIN
   void _submitOrder() async {
     if (currentOrder.isEmpty) return;
 
@@ -537,10 +523,7 @@ class _HomeScreenState extends State<HomeScreen> {
     bool isSaved = await LocalStorageService.saveOrder(orderData);
     if (mounted && isSaved) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isOnline ? 'Tạo đơn thành công!' : 'Lưu đơn Offline thành công!'),
-          backgroundColor: Colors.green,
-        ),
+        const SnackBar(content: Text('Tạo đơn hàng thành công! (Không cần mã PIN)'), backgroundColor: Colors.green),
       );
       setState(() => currentOrder.clear());
       _loadData();
@@ -561,17 +544,13 @@ class _HomeScreenState extends State<HomeScreen> {
               contentPadding: EdgeInsets.zero,
               filled: true,
               fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(20),
-                borderSide: BorderSide.none,
-              ),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
             ),
           ),
         ),
         actions: [
           IconButton(
-            icon: Icon(isOnline ? Icons.wifi : Icons.wifi_off,
-                color: isOnline ? Colors.green : Colors.orange),
+            icon: Icon(isOnline ? Icons.wifi : Icons.wifi_off, color: isOnline ? Colors.green : Colors.orange),
             onPressed: () => setState(() => isOnline = !isOnline),
           )
         ],
@@ -617,11 +596,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemBuilder: (ctx, index) {
                       final dish = filteredMenu[index];
                       double price = double.tryParse(dish['price'].toString()) ?? 0.0;
-                      double stock = double.tryParse(dish['stock'].toString()) ?? 0.0;
-
                       return Card(
                         child: InkWell(
-                          onTap: stock <= 0 ? null : () => _openQuantityModal(dish),
+                          onTap: () => _openQuantityModal(dish),
                           child: Padding(
                             padding: const EdgeInsets.all(6.0),
                             child: Column(
@@ -633,10 +610,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                                 Text(formatMoney(price),
-                                    style: const TextStyle(
-                                        color: Color(0xFF0D9488),
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12)),
+                                    style: const TextStyle(color: Color(0xFF0D9488), fontWeight: FontWeight.bold, fontSize: 12)),
                               ],
                             ),
                           ),
@@ -645,6 +619,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
           ),
+          if (currentOrder.isNotEmpty) ...[
+            Container(
+              color: Colors.white,
+              child: Column(
+                children: [
+                  const Divider(height: 1),
+                  ListTile(
+                    title: Text('Đơn hàng hiện tại (${currentOrder.length} món)'),
+                    subtitle: Text('Tạo & Xóa món không cần nhập mã', style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                    trailing: TextButton.icon(
+                      icon: const Icon(Icons.delete_sweep, color: Colors.red),
+                      label: const Text('Xóa hết đơn', style: TextStyle(color: Colors.red)),
+                      onPressed: () => setState(() => currentOrder.clear()), // XÓA ĐƠN KHÔNG CẦN PIN
+                    ),
+                  ),
+                ],
+              ),
+            )
+          ]
         ],
       ),
       bottomNavigationBar: currentOrder.isEmpty
@@ -659,15 +652,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
                 onPressed: _submitOrder,
-                child: Text('THANH TOÁN (${currentOrder.length} MÓN) • ${formatMoney(totalAmount)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: Text('TẠO ĐƠN HÀNG • ${formatMoney(totalAmount)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ),
             ),
     );
   }
 }
 
-// ------------------- 2. MÀN HÌNH QUẢN LÝ THỰC ĐƠN & DANH MỤC -------------------
+// ------------------- 2. THỰC ĐƠN (CẦN QUYỀN TẠO MÓN HOẶC MÃ PIN 000) -------------------
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({super.key});
 
@@ -677,7 +670,6 @@ class MenuManagementScreen extends StatefulWidget {
 
 class _MenuManagementScreenState extends State<MenuManagementScreen> {
   List<Map<String, dynamic>> menuList = [];
-  List<String> categories = [];
   bool isLoading = true;
 
   @override
@@ -689,18 +681,142 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   Future<void> _loadMenuData() async {
     setState(() => isLoading = true);
     final data = await LocalStorageService.fetchMenu();
-    final cats = await LocalStorageService.fetchCategories();
     setState(() {
       menuList = List<Map<String, dynamic>>.from(data);
-      categories = List<String>.from(cats);
       isLoading = false;
     });
+  }
+
+  // KIỂM TRẢ QUYỀN TRƯỚC KHI TẠO MÓN
+  void _addNewItemProcess() {
+    bool canCreateDirectly = LocalStorageService.hasPermission('createItem');
+
+    if (canCreateDirectly) {
+      _showCreateItemModal();
+    } else {
+      // Nếu chưa được cấp quyền -> Yêu cầu nhập mã PIN
+      _showPinPromptDialog();
+    }
+  }
+
+  void _showPinPromptDialog() {
+    final pinController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Yêu cầu Mã PIN Tạo Món'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Thiết bị này chưa được cấp quyền Tạo Món. Vui lòng nhập mã PIN (000) để tiếp tục:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: pinController,
+                keyboardType: TextInputType.number,
+                obscureText: true,
+                maxLength: 4,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 20, letterSpacing: 6),
+                decoration: const InputDecoration(hintText: '***'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+            ElevatedButton(
+              onPressed: () {
+                if (LocalStorageService.verifyMasterCode(pinController.text.trim())) {
+                  Navigator.pop(ctx);
+                  _showCreateItemModal();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Mã PIN không đúng!'), backgroundColor: Colors.red),
+                  );
+                }
+              },
+              child: const Text('Xác nhận'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showCreateItemModal() {
+    final nameController = TextEditingController();
+    final priceController = TextEditingController();
+    String category = 'Đồ Uống';
+    String unit = 'ly';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            top: 16, left: 16, right: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Tạo Món Mới Vẫn Giữ Cấu Trúc', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Tên món')),
+              TextField(
+                controller: priceController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Giá bán (VNĐ)'),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488), foregroundColor: Colors.white),
+                  onPressed: () async {
+                    if (nameController.text.isNotEmpty && priceController.text.isNotEmpty) {
+                      await LocalStorageService.addMenuItem({
+                        'name': nameController.text.trim(),
+                        'category': category,
+                        'price': double.tryParse(priceController.text) ?? 0.0,
+                        'unit': unit,
+                        'stock': 100.0,
+                        'toppings': [
+                          {'name': 'Topping Thêm 1', 'price': 5000.0}
+                        ]
+                      });
+                      Navigator.pop(ctx);
+                      _loadMenuData();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Tạo món thành công!'), backgroundColor: Colors.green),
+                      );
+                    }
+                  },
+                  child: const Text('LƯU MÓN MỚI'),
+                ),
+              )
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Quản Lý Thực Đơn & Danh Mục')),
+      appBar: AppBar(
+        title: const Text('Thực Đơn Món'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_circle, color: Color(0xFF0D9488), size: 28),
+            onPressed: _addNewItemProcess, // Bấm vào để kiểm tra quyền / nhập PIN
+          )
+        ],
+      ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
@@ -721,7 +837,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   }
 }
 
-// ------------------- 3. MÀN HÌNH MÁY CHỦ CHỐT NGÀY & TÍNH LỢI NHUẬN -------------------
+// ------------------- 3. MÀN HÌNH CHỐT LỢI NHUẬN CUỐI NGÀY -------------------
 class EndOfDayReportScreen extends StatefulWidget {
   const EndOfDayReportScreen({super.key});
 
@@ -732,187 +848,242 @@ class EndOfDayReportScreen extends StatefulWidget {
 class _EndOfDayReportScreenState extends State<EndOfDayReportScreen> {
   DateTime selectedDate = DateTime.now();
   List<Map<String, dynamic>> orders = [];
-  List<Map<String, dynamic>> expenses = [];
-  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadDataForDate();
+    _loadData();
   }
 
-  Future<void> _loadDataForDate() async {
-    setState(() => isLoading = true);
+  Future<void> _loadData() async {
     final allOrders = await LocalStorageService.fetchOrders();
-    final allExpenses = await LocalStorageService.fetchExpenses();
-
     String targetDateStr = selectedDate.toIso8601String().substring(0, 10);
-
     setState(() {
       orders = allOrders.where((o) => o['timestamp'].toString().startsWith(targetDateStr)).toList();
-      expenses = allExpenses.where((e) => e['timestamp'].toString().startsWith(targetDateStr)).toList();
-      isLoading = false;
     });
   }
 
   double get dayRevenue => orders.fold(0.0, (sum, o) => sum + (double.tryParse(o['total'].toString()) ?? 0.0));
-  double get dayExpenses => expenses.fold(0.0, (sum, e) => sum + (double.tryParse(e['amount'].toString()) ?? 0.0));
-  double get dayNetProfit => dayRevenue - dayExpenses;
 
   @override
   Widget build(BuildContext context) {
-    String dateFormatted = "${selectedDate.day}/${selectedDate.month}/${selectedDate.year}";
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Máy Chủ - Báo Cáo Chốt Ngày'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.calendar_month),
-            onPressed: () async {
-              DateTime? picked = await showDatePicker(
-                context: context,
-                initialDate: selectedDate,
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-              );
-              if (picked != null) {
-                setState(() => selectedDate = picked);
-                _loadDataForDate();
-              }
-            },
-          )
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+      appBar: AppBar(title: const Text('Báo Cáo Lợi Nhuận')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF10B981)),
+              ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Ngày chốt sổ: $dateFormatted',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: dayNetProfit >= 0 ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: dayNetProfit >= 0 ? const Color(0xFF10B981) : Colors.red,
+                  const Text('TỔNG DOANH THU HÔM NAY', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const SizedBox(height: 8),
+                  Text(formatMoney(dayRevenue),
+                      style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: Color(0xFF059669))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView.builder(
+                itemCount: orders.length,
+                itemBuilder: (ctx, idx) {
+                  final order = orders[idx];
+                  return Card(
+                    child: ListTile(
+                      title: Text('Đơn hàng #${order['id']}'),
+                      subtitle: Text(order['timestamp'].toString().substring(11, 16)),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(formatMoney(double.tryParse(order['total'].toString()) ?? 0),
+                              style: const TextStyle(fontWeight: FontWeight.bold)),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            onPressed: () async {
+                              // XÓA ĐƠN TRONG LỊCH SỬ - KHÔNG CẦN PIN
+                              await LocalStorageService.deleteOrder(order['id'].toString());
+                              _loadData();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Đã xóa đơn hàng thành công!')),
+                              );
+                            },
+                          )
+                        ],
                       ),
                     ),
-                    child: Column(
-                      children: [
-                        const Text('LỢI NHUẬN RÒNG CUỐI NGÀY',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        const SizedBox(height: 6),
-                        Text(
-                          formatMoney(dayNetProfit),
-                          style: TextStyle(
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
-                            color: dayNetProfit >= 0 ? const Color(0xFF059669) : Colors.red,
-                          ),
-                        ),
-                        const Divider(height: 20),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            Column(
-                              children: [
-                                const Text('Tổng Doanh Thu'),
-                                Text(formatMoney(dayRevenue),
-                                    style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            Column(
-                              children: [
-                                const Text('Tổng Chi Phí'),
-                                Text(formatMoney(dayExpenses),
-                                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                          ],
-                        )
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Tổng số đơn trong ngày: ${orders.length}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  const SizedBox(height: 8),
-                  ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
+                  );
+                },
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------- 4. MÀN HÌNH LỊCH SỬ ĐƠN & THAO TÁC (KIỂM TRẢ QUYỀN) -------------------
+class HistoryAndLogsScreen extends StatefulWidget {
+  const HistoryAndLogsScreen({super.key});
+
+  @override
+  State<HistoryAndLogsScreen> createState() => _HistoryAndLogsScreenState();
+}
+
+class _HistoryAndLogsScreenState extends State<HistoryAndLogsScreen> {
+  List<Map<String, dynamic>> logs = [];
+  List<Map<String, dynamic>> orders = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final l = await LocalStorageService.fetchLogs();
+    final o = await LocalStorageService.fetchOrders();
+    setState(() {
+      logs = List<Map<String, dynamic>>.from(l);
+      orders = List<Map<String, dynamic>>.from(o);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    bool canViewOrders = LocalStorageService.hasPermission('viewOrderHistory');
+    bool canViewLogs = LocalStorageService.hasPermission('viewLogs');
+
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Lịch Sử & Nhật Ký'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Lịch Sử Đơn Hàng'),
+              Tab(text: 'Nhật Ký Thao Tác'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // Tab 1: Lịch sử đơn hàng
+            canViewOrders
+                ? ListView.builder(
+                    padding: const EdgeInsets.all(8),
                     itemCount: orders.length,
                     itemBuilder: (ctx, idx) {
                       final order = orders[idx];
                       return ListTile(
-                        dense: true,
+                        leading: const Icon(Icons.receipt_long, color: Color(0xFF0D9488)),
                         title: Text('Đơn #${order['id']}'),
-                        subtitle: Text(order['timestamp'].toString().substring(11, 16)),
+                        subtitle: Text(order['timestamp'].toString().substring(0, 16)),
                         trailing: Text(formatMoney(double.tryParse(order['total'].toString()) ?? 0),
                             style: const TextStyle(fontWeight: FontWeight.bold)),
                       );
                     },
                   )
-                ],
-              ),
-            ),
+                : _buildPermissionDeniedWidget('Quyền xem Lịch Sử Đơn Hàng'),
+
+            // Tab 2: Nhật ký thao tác
+            canViewLogs
+                ? ListView.builder(
+                    padding: const EdgeInsets.all(8),
+                    itemCount: logs.length,
+                    itemBuilder: (ctx, idx) {
+                      final log = logs[logs.length - 1 - idx];
+                      return ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.info_outline, color: Colors.blueGrey),
+                        title: Text(log['detail'] ?? ''),
+                        subtitle: Text(log['time'] ?? ''),
+                      );
+                    },
+                  )
+                : _buildPermissionDeniedWidget('Quyền xem Nhật Ký Thao Tác'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPermissionDeniedWidget(String permName) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.lock_person_outlined, size: 64, color: Colors.orange),
+            const SizedBox(height: 16),
+            Text('Thiết bị chưa được cấp $permName',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Mã thiết bị của bạn là: ${LocalStorageService.myDeviceId}',
+                style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 8),
+            const Text('Vui lòng liên hệ Admin để cấp quyền cho thiết bị này.', textAlign: TextAlign.center),
+          ],
+        ),
+      ),
     );
   }
 }
 
-// ------------------- 4. MÀN HÌNH BẢO MẬT NHẬT KÝ THAO TÁC ĐƠN (PIN 000) -------------------
-class SecureLogsScreen extends StatefulWidget {
-  const SecureLogsScreen({super.key});
+// ------------------- 5. MÀN HÌNH ADMIN QUẢN LÝ CẤP QUYỀN -------------------
+class AdminPermissionScreen extends StatefulWidget {
+  const AdminPermissionScreen({super.key});
 
   @override
-  State<SecureLogsScreen> createState() => _SecureLogsScreenState();
+  State<AdminPermissionScreen> createState() => _AdminPermissionScreenState();
 }
 
-class _SecureLogsScreenState extends State<SecureLogsScreen> {
+class _AdminPermissionScreenState extends State<AdminPermissionScreen> {
+  bool isUnlocked = false;
   final pinController = TextEditingController();
-  List<Map<String, dynamic>> logs = [];
-  bool unlocked = LocalStorageService.isUnlocked;
+  final targetDeviceController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    if (unlocked) _loadLogs();
+    // Nếu thiết bị hiện tại có quyền Admin sẵn thì tự động mở
+    if (LocalStorageService.hasPermission('isAdmin')) {
+      isUnlocked = true;
+    }
   }
 
-  Future<void> _loadLogs() async {
-    final data = await LocalStorageService.fetchLogs();
-    setState(() => logs = List<Map<String, dynamic>>.from(data));
-  }
-
-  void _verifyCode() {
-    if (LocalStorageService.verifyCode(pinController.text.trim())) {
-      setState(() => unlocked = true);
-      _loadLogs();
+  void _verifyAdmin() {
+    if (LocalStorageService.verifyMasterCode(pinController.text.trim())) {
+      setState(() => isUnlocked = true);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mã PIN không đúng! Vui lòng nhập lại.'), backgroundColor: Colors.red),
+        const SnackBar(content: Text('Mã PIN Admin không đúng! (Mã mặc định: 000)'), backgroundColor: Colors.red),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!unlocked) {
+    if (!isUnlocked) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Bảo Mật Thao Tác Đơn')),
+        appBar: AppBar(title: const Text('Quản Lý Phân Quyền')),
         body: Padding(
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.lock_outline, size: 64, color: Color(0xFF0D9488)),
+              const Icon(Icons.admin_panel_settings, size: 72, color: Color(0xFF0D9488)),
               const SizedBox(height: 16),
-              const Text('Nhập mã CODE (Mã mặc định: 000) để xem dữ liệu thao tác đơn hàng:',
+              const Text('Nhập Mã PIN Admin (Mã mặc định 000) để vào Bảng Cấp Quyền:',
                   textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               TextField(
@@ -931,8 +1102,8 @@ class _SecureLogsScreenState extends State<SecureLogsScreen> {
                   foregroundColor: Colors.white,
                   minimumSize: const Size.fromHeight(48),
                 ),
-                onPressed: _verifyCode,
-                child: const Text('XÁC NHẬN MÃ CODE'),
+                onPressed: _verifyAdmin,
+                child: const Text('MỞ KHÓA ADMIN'),
               ),
             ],
           ),
@@ -940,33 +1111,149 @@ class _SecureLogsScreenState extends State<SecureLogsScreen> {
       );
     }
 
+    final allPermissions = LocalStorageService.getAllPermissions();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Lịch Sử Thao Tác Đơn Hàng'),
+        title: const Text('Bảng Cấp Quyền Bằng Device ID'),
         actions: [
           IconButton(
             icon: const Icon(Icons.lock),
-            onPressed: () {
-              setState(() {
-                LocalStorageService.isUnlocked = false;
-                unlocked = false;
-              });
-            },
+            onPressed: () => setState(() => isUnlocked = false),
           )
         ],
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(8),
-        itemCount: logs.length,
-        itemBuilder: (ctx, index) {
-          final log = logs[logs.length - 1 - index];
-          return ListTile(
-            dense: true,
-            leading: const Icon(Icons.history, color: Color(0xFF0D9488)),
-            title: Text(log['detail'] ?? ''),
-            subtitle: Text(log['time'] ?? ''),
-          );
-        },
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // THÔNG TIN THIẾT BỊ HIỆN TẠI
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(8)),
+              child: Row(
+                children: [
+                  const Icon(Icons.phone_android, color: Color(0xFF0D9488)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Mã Định Danh Máy Này: ${LocalStorageService.myDeviceId}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            const Text('Danh Sách Các Thiết Bị Đã Được Cấp Quyền:',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+
+            ...allPermissions.entries.map((entry) {
+              String devId = entry.key;
+              Map<String, bool> perms = entry.value;
+
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Mã Thiết Bị: $devId',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0D9488))),
+                          if (devId == LocalStorageService.myDeviceId)
+                            const Chip(label: Text('Máy này'), backgroundColor: Color(0xFFCCFBF1))
+                        ],
+                      ),
+                      const Divider(),
+                      SwitchListTile(
+                        dense: true,
+                        title: const Text('Quyền Xem Lịch Sử Đơn Hàng'),
+                        value: perms['viewOrderHistory'] ?? false,
+                        onChanged: (val) {
+                          setState(() {
+                            LocalStorageService.togglePermission(devId, 'viewOrderHistory', val);
+                          });
+                        },
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        title: const Text('Quyền Xem Nhật Ký Thao Tác'),
+                        value: perms['viewLogs'] ?? false,
+                        onChanged: (val) {
+                          setState(() {
+                            LocalStorageService.togglePermission(devId, 'viewLogs', val);
+                          });
+                        },
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        title: const Text('Quyền Tạo Món Mới'),
+                        value: perms['createItem'] ?? false,
+                        onChanged: (val) {
+                          setState(() {
+                            LocalStorageService.togglePermission(devId, 'createItem', val);
+                          });
+                        },
+                      ),
+                      SwitchListTile(
+                        dense: true,
+                        title: const Text('Quyền Admin (Toàn Quyền)'),
+                        value: perms['isAdmin'] ?? false,
+                        onChanged: (val) {
+                          setState(() {
+                            LocalStorageService.togglePermission(devId, 'isAdmin', val);
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+
+            const SizedBox(height: 16),
+            const Divider(),
+            const Text('Cấp Quyền Cho Thiết Bị Mới Bằng Mã Device ID:',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: targetDeviceController,
+                    decoration: const InputDecoration(
+                      hintText: 'Nhập mã ví dụ: DEV-9999',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488), foregroundColor: Colors.white),
+                  onPressed: () {
+                    String newDevId = targetDeviceController.text.trim();
+                    if (newDevId.isNotEmpty) {
+                      setState(() {
+                        LocalStorageService.togglePermission(newDevId, 'viewOrderHistory', true);
+                        targetDeviceController.clear();
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Đã khởi tạo và cấp quyền cho thiết bị $newDevId')),
+                      );
+                    }
+                  },
+                  child: const Text('Thêm Máy'),
+                )
+              ],
+            )
+          ],
+        ),
       ),
     );
   }
