@@ -9,6 +9,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  network_info_plus: ^6.0.0
+  http: ^1.2.0
+
+  flutter:
+    sdk: flutter
   cupertino_icons: ^1.0.6
   uuid: ^4.3.3
   shared_preferences: ^2.2.2
