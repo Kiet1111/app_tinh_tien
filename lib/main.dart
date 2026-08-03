@@ -16,6 +16,15 @@ String formatMoney(double amount) {
 
 // ------------------- LỚP XỬ LÝ DỮ LIỆU ĐỘC LẬP (LOCAL STORAGE) -------------------
 class LocalStorageService {
+  // Danh sách danh mục món ăn
+  static final List<String> _categories = [
+    'Tất cả',
+    'Đồ Uống',
+    'Đồ Ăn',
+    'Đồ Cân',
+  ];
+
+  // Danh sách thực đơn mẫu kèm Biến thể & Topping
   static final List<Map<String, dynamic>> _menuList = [
     {
       'id': '1',
@@ -24,18 +33,28 @@ class LocalStorageService {
       'price': 25000.0,
       'unit': 'ly',
       'stock': 50.0,
-      'variants': [],
-      'toppings': []
+      'variants': [
+        {'name': 'Ít đường', 'price': 25000.0},
+        {'name': 'Nhiều sữa', 'price': 28000.0}
+      ],
+      'toppings': [
+        {'name': 'Trân châu đen', 'price': 5000.0},
+        {'name': 'Pudding trứng', 'price': 7000.0},
+        {'name': 'Kem cheese', 'price': 10000.0},
+      ]
     },
     {
       'id': '2',
-      'name': 'Bạc Xỉu',
+      'name': 'Trà Sữa Thái Xanh',
       'category': 'Đồ Uống',
-      'price': 28000.0,
+      'price': 30000.0,
       'unit': 'ly',
-      'stock': 30.0,
+      'stock': 40.0,
       'variants': [],
-      'toppings': []
+      'toppings': [
+        {'name': 'Trân châu 3Q', 'price': 5000.0},
+        {'name': 'Thạch trái cây', 'price': 5000.0},
+      ]
     },
     {
       'id': '3',
@@ -45,7 +64,10 @@ class LocalStorageService {
       'unit': 'ổ',
       'stock': 20.0,
       'variants': [],
-      'toppings': []
+      'toppings': [
+        {'name': 'Thêm trứng ốp la', 'price': 5000.0},
+        {'name': 'Thêm chả lụa', 'price': 7000.0},
+      ]
     },
     {
       'id': '4',
@@ -55,7 +77,10 @@ class LocalStorageService {
       'unit': 'tô',
       'stock': 15.0,
       'variants': [],
-      'toppings': []
+      'toppings': [
+        {'name': 'Thêm tôm', 'price': 10000.0},
+        {'name': 'Thêm trứng cút', 'price': 5000.0},
+      ]
     },
     {
       'id': '5',
@@ -78,6 +103,32 @@ class LocalStorageService {
     }
   ];
 
+  // QUẢN LÝ DANH MỤC
+  static Future<List<String>> fetchCategories() async {
+    return List<String>.from(_categories);
+  }
+
+  static Future<void> addCategory(String categoryName) async {
+    if (!_categories.contains(categoryName)) {
+      _categories.add(categoryName);
+      _logs.add({
+        'detail': 'Thêm danh mục mới: $categoryName',
+        'time': DateTime.now().toString().substring(0, 16)
+      });
+    }
+  }
+
+  static Future<void> deleteCategory(String categoryName) async {
+    if (categoryName != 'Tất cả') {
+      _categories.remove(categoryName);
+      _logs.add({
+        'detail': 'Xóa danh mục: $categoryName',
+        'time': DateTime.now().toString().substring(0, 16)
+      });
+    }
+  }
+
+  // QUẢN LÝ MÓN ÁN
   static Future<List<Map<String, dynamic>>> fetchMenu() async {
     return List<Map<String, dynamic>>.from(_menuList);
   }
@@ -179,7 +230,6 @@ class MyApp extends StatelessWidget {
           centerTitle: false,
           elevation: 0,
         ),
-        // Sửa lỗi triệt để: Sử dụng CardThemeData chuẩn tương thích mọi phiên bản Flutter
         cardTheme: CardThemeData(
           elevation: 0,
           color: Colors.white,
@@ -259,6 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoadingMenu = true;
 
   List<Map<String, dynamic>> menuList = [];
+  List<String> categories = ['Tất cả'];
   List<Map<String, dynamic>> currentOrder = [];
   String selectedCategory = 'Tất cả';
   String searchQuery = '';
@@ -266,25 +317,18 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadMenu();
+    _loadData();
   }
 
-  Future<void> _loadMenu() async {
+  Future<void> _loadData() async {
     setState(() => isLoadingMenu = true);
     final data = await LocalStorageService.fetchMenu();
+    final cats = await LocalStorageService.fetchCategories();
     setState(() {
       menuList = List<Map<String, dynamic>>.from(data);
+      categories = List<String>.from(cats);
       isLoadingMenu = false;
     });
-  }
-
-  List<String> get categories {
-    List<String> list = ['Tất cả'];
-    for (var item in menuList) {
-      String cat = item['category']?.toString() ?? 'Khác';
-      if (!list.contains(cat)) list.add(cat);
-    }
-    return list;
   }
 
   List<Map<String, dynamic>> get filteredMenu {
@@ -311,8 +355,13 @@ class _HomeScreenState extends State<HomeScreen> {
     List<Map<String, dynamic>> variants =
         rawVariants.map((v) => Map<String, dynamic>.from(v)).toList();
 
+    List rawToppings = dish['toppings'] ?? [];
+    List<Map<String, dynamic>> toppings =
+        rawToppings.map((t) => Map<String, dynamic>.from(t)).toList();
+
     Map<String, dynamic>? selectedVariant =
         variants.isNotEmpty ? variants.first : null;
+    List<Map<String, dynamic>> selectedToppings = [];
 
     showModalBottomSheet(
       context: context,
@@ -326,6 +375,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? (double.tryParse(selectedVariant!['price'].toString()) ?? 0.0)
                 : baseUnitPrice;
 
+            // Tính tổng tiền Toppings đã chọn
+            double toppingTotal = selectedToppings.fold(0.0, (sum, t) {
+              return sum + (double.tryParse(t['price'].toString()) ?? 0.0);
+            });
+
             double calculatedQty = 1.0;
             if (isWeightUnit) {
               if (weightGramController.text.isNotEmpty) {
@@ -338,7 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
               calculatedQty = double.tryParse(qtyController.text) ?? 1.0;
             }
 
-            double totalPrice = currentUnitPrice * calculatedQty;
+            double totalPrice = (currentUnitPrice + toppingTotal) * calculatedQty;
 
             return Padding(
               padding: EdgeInsets.only(
@@ -479,7 +533,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     if (variants.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      const Text('Biến thể:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('Chọn Biến Thể:', style: TextStyle(fontWeight: FontWeight.bold)),
                       Wrap(
                         spacing: 8,
                         children: variants.map((v) {
@@ -489,6 +543,36 @@ class _HomeScreenState extends State<HomeScreen> {
                             selected: isSel,
                             onSelected: (val) {
                               if (val) setModalState(() => selectedVariant = v);
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+
+                    // PHẦN CHỌN TOPPING
+                    if (toppings.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Text('Chọn Topping kềnh thêm:',
+                          style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0D9488))),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        children: toppings.map((t) {
+                          bool isSel = selectedToppings.any((item) => item['name'] == t['name']);
+                          double tPrice = double.tryParse(t['price'].toString()) ?? 0.0;
+                          return FilterChip(
+                            selectedColor: const Color(0xFFCCFBF1),
+                            checkmarkColor: const Color(0xFF0D9488),
+                            label: Text('${t['name']} (+${formatMoney(tPrice)})'),
+                            selected: isSel,
+                            onSelected: (val) {
+                              setModalState(() {
+                                if (val) {
+                                  selectedToppings.add(t);
+                                } else {
+                                  selectedToppings.removeWhere((item) => item['name'] == t['name']);
+                                }
+                              });
                             },
                           );
                         }).toList(),
@@ -519,12 +603,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 if (selectedVariant != null) {
                                   fullName += ' (${selectedVariant!['name']})';
                                 }
+                                if (selectedToppings.isNotEmpty) {
+                                  String topNames = selectedToppings.map((t) => t['name']).join(', ');
+                                  fullName += ' + [$topNames]';
+                                }
 
                                 setState(() {
                                   currentOrder.add({
                                     'dishId': dish['id'],
                                     'name': fullName,
-                                    'price': currentUnitPrice,
+                                    'price': currentUnitPrice + toppingTotal,
                                     'qty': calculatedQty,
                                     'displayQty': displayQty,
                                     'totalPrice': totalPrice,
@@ -676,7 +764,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
       setState(() => currentOrder.clear());
-      _loadMenu();
+      _loadData();
     }
   }
 
@@ -934,7 +1022,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ------------------- 2. MÀN HÌNH QUẢN LÝ THỰC ĐƠN -------------------
+// ------------------- 2. MÀN HÌNH QUẢN LÝ THỰC ĐƠN, DANH MỤC & TOPPING -------------------
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({super.key});
 
@@ -944,28 +1032,110 @@ class MenuManagementScreen extends StatefulWidget {
 
 class _MenuManagementScreenState extends State<MenuManagementScreen> {
   List<Map<String, dynamic>> menuList = [];
+  List<String> categories = [];
   bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadMenu();
+    _loadMenuData();
   }
 
-  Future<void> _loadMenu() async {
+  Future<void> _loadMenuData() async {
     setState(() => isLoading = true);
     final data = await LocalStorageService.fetchMenu();
+    final cats = await LocalStorageService.fetchCategories();
     setState(() {
       menuList = List<Map<String, dynamic>>.from(data);
+      categories = List<String>.from(cats);
       isLoading = false;
     });
   }
 
+  // DIALOG QUẢN LÝ DANH MỤC
+  void _showCategoryManagerDialog() {
+    final catCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          title: const Text('Quản Lý Danh Mục Món',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: catCtrl,
+                      decoration: const InputDecoration(
+                          hintText: 'Tên danh mục mới (VD: Ăn Vặt)',
+                          isDense: true),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle, color: Color(0xFF0D9488)),
+                    onPressed: () async {
+                      if (catCtrl.text.trim().isNotEmpty) {
+                        await LocalStorageService.addCategory(catCtrl.text.trim());
+                        catCtrl.clear();
+                        final updated = await LocalStorageService.fetchCategories();
+                        setDlgState(() => categories = updated);
+                        _loadMenuData();
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 180,
+                width: double.maxFinite,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: categories.length,
+                  itemBuilder: (c, idx) {
+                    String cat = categories[idx];
+                    if (cat == 'Tất cả') return const SizedBox.shrink();
+                    return ListTile(
+                      dense: true,
+                      title: Text(cat),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                        onPressed: () async {
+                          await LocalStorageService.deleteCategory(cat);
+                          final updated = await LocalStorageService.fetchCategories();
+                          setDlgState(() => categories = updated);
+                          _loadMenuData();
+                        },
+                      ),
+                    );
+                  },
+                ),
+              )
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('Đóng'))
+          ],
+        ),
+      ),
+    );
+  }
+
+  // DIALOG THÊM / SỬA MÓN (BAO GỒM CỦA CẢ TOPPING)
   void _showItemFormDialog([Map<String, dynamic>? existingItem]) {
     final bool isEdit = existingItem != null;
 
     final nameCtrl = TextEditingController(text: isEdit ? existingItem['name'] : '');
-    final catCtrl = TextEditingController(text: isEdit ? existingItem['category'] : '');
+    String selectedCat = isEdit
+        ? existingItem['category']
+        : (categories.length > 1 ? categories[1] : 'Khác');
+    if (!categories.contains(selectedCat)) selectedCat = categories.first;
+
     final priceCtrl = TextEditingController(
         text: isEdit ? existingItem['price'].toString() : '');
     final unitCtrl = TextEditingController(
@@ -973,85 +1143,162 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     final stockCtrl = TextEditingController(
         text: isEdit ? (existingItem['stock'] ?? 100).toString() : '100');
 
+    // Danh sách Toppings tạm thời
+    List<Map<String, dynamic>> tempToppings = isEdit
+        ? List<Map<String, dynamic>>.from(existingItem['toppings'] ?? [])
+        : [];
+
+    final toppingNameCtrl = TextEditingController();
+    final toppingPriceCtrl = TextEditingController();
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(isEdit ? 'Chỉnh Sửa Món' : 'Thêm Món Mới',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Tên món'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: catCtrl,
-                decoration: const InputDecoration(labelText: 'Danh mục'),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: priceCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Giá bán'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          title: Text(isEdit ? 'Chỉnh Sửa Món' : 'Thêm Món Mới',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Tên món'),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  value: selectedCat,
+                  decoration: const InputDecoration(labelText: 'Danh mục'),
+                  items: categories
+                      .where((c) => c != 'Tất cả')
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (val) {
+                    if (val != null) setDlgState(() => selectedCat = val);
+                  },
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: priceCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: 'Giá gốc'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: unitCtrl,
-                      decoration: const InputDecoration(labelText: 'Đơn vị'),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: unitCtrl,
+                        decoration: const InputDecoration(labelText: 'Đơn vị (ly, kg, tô...)'),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: stockCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Số lượng tồn kho'),
-              ),
-            ],
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: stockCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Số lượng tồn kho'),
+                ),
+                
+                const Divider(height: 24),
+                const Text('Cấu hình Topping đi kèm:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0D9488))),
+                const SizedBox(height: 6),
+                
+                // Form thêm topping nhỏ
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: toppingNameCtrl,
+                        decoration: const InputDecoration(hintText: 'Tên Topping', isDense: true),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: toppingPriceCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(hintText: 'Giá Topping', isDense: true),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_box, color: Color(0xFF0D9488)),
+                      onPressed: () {
+                        String tName = toppingNameCtrl.text.trim();
+                        double tPrice = double.tryParse(toppingPriceCtrl.text) ?? 0.0;
+                        if (tName.isNotEmpty) {
+                          setDlgState(() {
+                            tempToppings.add({'name': tName, 'price': tPrice});
+                            toppingNameCtrl.clear();
+                            toppingPriceCtrl.clear();
+                          });
+                        }
+                      },
+                    )
+                  ],
+                ),
+                const SizedBox(height: 6),
+                
+                // Hiển thị danh sách Topping đã tạo
+                Wrap(
+                  spacing: 6,
+                  children: tempToppings.map((t) {
+                    return Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text('${t['name']} (+${formatMoney(double.tryParse(t['price'].toString()) ?? 0)})',
+                          style: const TextStyle(fontSize: 11)),
+                      onDeleted: () {
+                        setDlgState(() {
+                          tempToppings.remove(t);
+                        });
+                      },
+                    );
+                  }).toList(),
+                )
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0D9488),
+                  foregroundColor: Colors.white),
+              onPressed: () async {
+                String name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+
+                Map<String, dynamic> itemData = {
+                  'id': isEdit ? existingItem['id'] : null,
+                  'name': name,
+                  'category': selectedCat,
+                  'price': double.tryParse(priceCtrl.text) ?? 0.0,
+                  'unit': unitCtrl.text.trim().isEmpty ? 'phần' : unitCtrl.text.trim(),
+                  'stock': double.tryParse(stockCtrl.text) ?? 0.0,
+                  'variants': isEdit ? existingItem['variants'] : [],
+                  'toppings': tempToppings,
+                };
+
+                Navigator.pop(ctx);
+                if (isEdit) {
+                  await LocalStorageService.updateMenuItem(itemData);
+                } else {
+                  await LocalStorageService.addMenuItem(itemData);
+                }
+                _loadMenuData();
+              },
+              child: Text(isEdit ? 'Lưu' : 'Thêm'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0D9488),
-                foregroundColor: Colors.white),
-            onPressed: () async {
-              String name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
-
-              Map<String, dynamic> itemData = {
-                'id': isEdit ? existingItem['id'] : null,
-                'name': name,
-                'category': catCtrl.text.trim().isEmpty ? 'Khác' : catCtrl.text.trim(),
-                'price': double.tryParse(priceCtrl.text) ?? 0.0,
-                'unit': unitCtrl.text.trim().isEmpty ? 'phần' : unitCtrl.text.trim(),
-                'stock': double.tryParse(stockCtrl.text) ?? 0.0,
-                'variants': isEdit ? existingItem['variants'] : [],
-                'toppings': isEdit ? existingItem['toppings'] : [],
-              };
-
-              Navigator.pop(ctx);
-              if (isEdit) {
-                await LocalStorageService.updateMenuItem(itemData);
-              } else {
-                await LocalStorageService.addMenuItem(itemData);
-              }
-              _loadMenu();
-            },
-            child: Text(isEdit ? 'Lưu' : 'Thêm'),
-          ),
-        ],
       ),
     );
   }
@@ -1061,6 +1308,13 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Quản Lý Thực Đơn'),
+        actions: [
+          TextButton.icon(
+            onPressed: _showCategoryManagerDialog,
+            icon: const Icon(Icons.category, size: 18, color: Color(0xFF0D9488)),
+            label: const Text('Danh Mục', style: TextStyle(color: Color(0xFF0D9488))),
+          )
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: const Color(0xFF0D9488),
@@ -1077,16 +1331,26 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                 final item = menuList[index];
                 double price = double.tryParse(item['price'].toString()) ?? 0;
                 double stock = double.tryParse(item['stock'].toString()) ?? 0;
+                List toppings = item['toppings'] ?? [];
 
                 return Card(
                   margin: const EdgeInsets.symmetric(vertical: 4),
                   child: ListTile(
                     dense: true,
-                    title: Text(item['name'],
+                    title: Text('${item['name']} [${item['category']}]',
                         style: const TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: Text(
-                        'Giá: ${formatMoney(price)} / ${item['unit']} | Tồn: $stock'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Giá: ${formatMoney(price)} / ${item['unit']} | Tồn: $stock'),
+                        if (toppings.isNotEmpty)
+                          Text(
+                            'Topping: ${toppings.map((t) => t['name']).join(', ')}',
+                            style: const TextStyle(fontSize: 10, color: Color(0xFF0D9488)),
+                          ),
+                      ],
+                    ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -1099,7 +1363,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                           onPressed: () async {
                             await LocalStorageService.deleteMenuItem(
                                 item['id'].toString());
-                            _loadMenu();
+                            _loadMenuData();
                           },
                         ),
                       ],
