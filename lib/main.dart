@@ -1,3 +1,5 @@
+import 'lan_service.dart';
+
 // lib/main.dart
 
 import 'dart:math';
