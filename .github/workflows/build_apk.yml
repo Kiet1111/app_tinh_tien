@@ -1,8 +1,8 @@
-name: Build Flutter APK
+name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -10,8 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -24,14 +23,16 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Get dependencies
+      - name: Get Dependencies
         run: flutter pub get
 
       - name: Build APK
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs='-Xmx4g -XX:MaxMetaspaceSize=512m'"
         run: flutter build apk --release
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: App_Tinh_Tien_APK
           path: build/app/outputs/flutter-apk/app-release.apk
