@@ -1173,7 +1173,7 @@ class _FinancialReportScreenState extends State<FinancialReportScreen> {
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulWidget(
+      builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
           title: const Text('Nhập Chi Phí', style: TextStyle(fontSize: 16)),
           content: Column(
