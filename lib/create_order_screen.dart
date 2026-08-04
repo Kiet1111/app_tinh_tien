@@ -2,145 +2,186 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CreateOrderScreen extends StatefulWidget {
-  final String tableName;
-  const CreateOrderScreen({Key? key, required this.tableName}) : super(key: key);
+  final String? existingOrderId; // Nếu null là tạo đơn mới
+
+  const CreateOrderScreen({Key? key, this.existingOrderId}) : super(key: key);
 
   @override
   State<CreateOrderScreen> createState() => _CreateOrderScreenState();
 }
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
-  final Map<String, Map<String, dynamic>> _cart = {};
-  bool _isSaving = false;
+  final List<Map<String, dynamic>> _selectedItems = [];
 
-  double get _totalPrice {
-    double total = 0;
-    _cart.forEach((key, item) {
-      total += (item['price'] as double) * (item['quantity'] as int);
-    });
-    return total;
+  // Dialog chọn biến thể & đồ ăn thêm cho món được bấm
+  void _showAddOptionDialog(Map<String, dynamic> menuItem) {
+    final List variants = menuItem['variants'] ?? [];
+    final List addOns = menuItem['addOns'] ?? [];
+
+    Map<String, dynamic>? selectedVariant = variants.isNotEmpty ? variants.first : null;
+    List<Map<String, dynamic>> selectedAddOns = [];
+    int quantity = 1;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDlgState) {
+            double calculateTotalPrice() {
+              double base = (menuItem['price'] ?? 0).toDouble();
+              if (selectedVariant != null) {
+                base += (selectedVariant!['price'] ?? 0).toDouble();
+              }
+              for (var addon in selectedAddOns) {
+                base += (addon['price'] ?? 0).toDouble();
+              }
+              return base * quantity;
+            }
+
+            return AlertDialog(
+              title: Text(menuItem['name'] ?? ''),
+              content: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Biến thể
+                    if (variants.isNotEmpty) ...[
+                      const Text('Chọn Biến Thể:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...variants.map((v) => RadioListTile<Map<String, dynamic>>(
+                            title: Text('${v['name']} (+${v['price']}k)'),
+                            value: v,
+                            groupValue: selectedVariant,
+                            onChanged: (val) => setDlgState(() => selectedVariant = val),
+                          )),
+                      const Divider(),
+                    ],
+                    // Đồ ăn thêm
+                    if (addOns.isNotEmpty) ...[
+                      const Text('Đồ Ăn Thêm:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ...addOns.map((a) {
+                        final isChecked = selectedAddOns.contains(a);
+                        return CheckboxListTile(
+                          title: Text('${a['name']} (+${a['price']}k)'),
+                          value: isChecked,
+                          onChanged: (val) {
+                            setDlgState(() {
+                              if (val == true) {
+                                selectedAddOns.add(a);
+                              } else {
+                                selectedAddOns.remove(a);
+                              }
+                            });
+                          },
+                        );
+                      }),
+                      const Divider(),
+                    ],
+                    // Số lượng
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Số lượng:'),
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.remove_circle_outline),
+                              onPressed: quantity > 1 ? () => setDlgState(() => quantity--) : null,
+                            ),
+                            Text('$quantity', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                            IconButton(
+                              icon: const Icon(Icons.add_circle_outline),
+                              onPressed: () => setDlgState(() => quantity++),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _selectedItems.add({
+                        'name': menuItem['name'],
+                        'unit': menuItem['unit'] ?? 'Phần',
+                        'variant': selectedVariant != null ? selectedVariant!['name'] : null,
+                        'addOns': selectedAddOns.map((a) => a['name']).toList(),
+                        'quantity': quantity,
+                        'totalPrice': calculateTotalPrice(),
+                      });
+                    });
+                    Navigator.pop(ctx);
+                  },
+                  child: Text('Thêm (${calculateTotalPrice().toStringAsFixed(0)} VNĐ)'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
-  void _addItem(String id, String name, double price) {
-    setState(() {
-      if (_cart.containsKey(id)) {
-        _cart[id]!['quantity'] += 1;
-      } else {
-        _cart[id] = {
-          'name': name,
-          'price': price,
-          'quantity': 1,
-        };
-      }
-    });
-  }
+  Future<void> _submitOrder() async {
+    if (_selectedItems.isEmpty) return;
 
-  void _removeItem(String id) {
-    setState(() {
-      if (_cart.containsKey(id)) {
-        if (_cart[id]!['quantity'] > 1) {
-          _cart[id]!['quantity'] -= 1;
-        } else {
-          _cart.remove(id);
-        }
-      }
-    });
-  }
-
-  Future<void> _saveOrder() async {
-    if (_cart.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng chọn ít nhất 1 món ăn!')),
-      );
-      return;
+    double grandTotal = 0;
+    for (var item in _selectedItems) {
+      grandTotal += (item['totalPrice'] ?? 0).toDouble();
     }
 
-    setState(() => _isSaving = true);
+    final orderData = {
+      'items': _selectedItems,
+      'totalAmount': grandTotal,
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+      'dateString': DateTime.now().toIso8601String().substring(0, 10),
+    };
 
-    try {
-      List<Map<String, dynamic>> itemList = _cart.values.toList();
+    final docRef = await FirebaseFirestore.instance.collection('orders').add(orderData);
 
-      await FirebaseFirestore.instance.collection('orders').add({
-        'tableName': widget.tableName,
-        'items': itemList,
-        'totalAmount': _totalPrice,
-        'status': 'pending', // pending = đang phục vụ (chưa thanh toán)
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+    // Ghi nhật ký thao tác
+    await FirebaseFirestore.instance.collection('logs').add({
+      'action': 'Tạo đơn mới #${docRef.id.substring(0, 5)} - Giá trị: ${grandTotal.toStringAsFixed(0)} VNĐ',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Đã tạo hóa đơn cho ${widget.tableName}!')),
-        );
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+    if (mounted) {
+      Navigator.pop(context);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Tạo Hóa Đơn - ${widget.tableName}'),
-      ),
+      appBar: AppBar(title: const Text('Tạo Đơn Hàng Mới')),
       body: Column(
         children: [
+          // Danh sách món chọn
           Expanded(
+            flex: 2,
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('menu_items').snapshots(),
               builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('Chưa có món ăn nào trong thực đơn.'));
-                }
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                final docs = snapshot.data!.docs;
 
-                final items = snapshot.data!.docs;
-
-                return ListView.builder(
-                  itemCount: items.length,
+                return GridView.builder(
+                  padding: const EdgeInsets.all(8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 2.5, crossAxisSpacing: 8, mainAxisSpacing: 8),
+                  itemCount: docs.length,
                   itemBuilder: (context, index) {
-                    final doc = items[index];
-                    final data = doc.data() as Map<String, dynamic>;
-                    final id = doc.id;
-                    final name = data['name'] ?? '';
-                    final price = (data['price'] ?? 0).toDouble();
-                    final imageUrl = data['imageUrl'] ?? '';
-
-                    final qty = _cart[id]?['quantity'] ?? 0;
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      child: ListTile(
-                        leading: imageUrl.isNotEmpty
-                            ? Image.network(imageUrl, width: 50, height: 50, fit: BoxFit.cover)
-                            : const Icon(Icons.fastfood, size: 40),
-                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('${price.toStringAsFixed(0)} VNĐ'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (qty > 0) ...[
-                              IconButton(
-                                icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                                onPressed: () => _removeItem(id),
-                              ),
-                              Text('$qty', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                            ],
-                            IconButton(
-                              icon: const Icon(Icons.add_circle_outline, color: Colors.green),
-                              onPressed: () => _addItem(id, name, price),
-                            ),
-                          ],
+                    final item = docs[index].data() as Map<String, dynamic>;
+                    return InkWell(
+                      onTap: () => _showAddOptionDialog(item),
+                      child: Card(
+                        color: Colors.orange.shade50,
+                        child: Center(
+                          child: Text(item['name'] ?? '', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold)),
                         ),
                       ),
                     );
@@ -149,46 +190,36 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
               },
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(color: Colors.black12, blurRadius: 4, spreadRadius: 2),
-              ],
-            ),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Tổng tiền:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    Text(
-                      '${_totalPrice.toStringAsFixed(0)} VNĐ',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.deepOrange),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _saveOrder,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepOrange,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    child: _isSaving
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : const Text('TẠO HÓA ĐƠN', style: TextStyle(fontSize: 16, color: Colors.white)),
+          const Divider(),
+          // Các món đã thêm vào đơn
+          Expanded(
+            flex: 3,
+            child: ListView.builder(
+              itemCount: _selectedItems.length,
+              itemBuilder: (context, index) {
+                final item = _selectedItems[index];
+                final variantStr = item['variant'] != null ? ' [${item['variant']}]' : '';
+                final addOnsStr = (item['addOns'] as List).isNotEmpty ? ' (+${(item['addOns'] as List).join(', ')})' : '';
+
+                return ListTile(
+                  title: Text('${item['name']}$variantStr$addOnsStr'),
+                  subtitle: Text('SL: ${item['quantity']} ${item['unit']}'),
+                  trailing: Text('${(item['totalPrice'] ?? 0).toStringAsFixed(0)} VNĐ'),
+                  leading: IconButton(
+                    icon: const Icon(Icons.remove_circle, color: Colors.red),
+                    onPressed: () => setState(() => _selectedItems.removeAt(index)),
                   ),
-                ),
-              ],
+                );
+              },
             ),
+          ),
+          ElevatedButton(
+            onPressed: _selectedItems.isEmpty ? null : _submitOrder,
+            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50), backgroundColor: Colors.green),
+            child: const Text('HOÀN TẤT TẠO ĐƠN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
   }
 }
-
