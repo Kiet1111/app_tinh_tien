@@ -8,7 +8,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Tránh màn hình xám khi có lỗi giao diện trong Release mode
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return Material(
       child: Container(
@@ -813,6 +812,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       (sum, i) => sum + ((i['totalPrice'] as num?)?.toDouble() ?? 0.0)
     ) ?? 0.0;
 
+    // Gán ra biến cục bộ để ép kiểu Null Safety cho Closure
+    final activeTable = currentTable;
+
     return Column(
       children: [
         SizedBox(
@@ -891,7 +893,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             },
           ),
         ),
-        if (currentTable != null)
+        if (activeTable != null)
           Card(
             margin: const EdgeInsets.all(8),
             child: Padding(
@@ -901,7 +903,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Đơn hàng: ${currentTable.tableName}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      Text('Đơn hàng: ${activeTable.tableName}', style: const TextStyle(fontWeight: FontWeight.bold)),
                       if (currentRole == 'Admin')
                         TextButton.icon(
                           style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -914,9 +916,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    itemCount: currentTable.items.length,
+                    itemCount: activeTable.items.length,
                     itemBuilder: (c, idx) {
-                      final order = currentTable.items[idx];
+                      final order = activeTable.items[idx];
                       double itemTotal = (order['totalPrice'] as num? ?? 0).toDouble();
                       return ListTile(
                         dense: true,
@@ -930,8 +932,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             IconButton(
                               icon: const Icon(Icons.remove_circle, color: Colors.red, size: 18),
                               onPressed: () {
-                                currentTable!.items.removeAt(idx);
-                                _syncTableToCloud(currentTable);
+                                activeTable.items.removeAt(idx);
+                                _syncTableToCloud(activeTable);
                               },
                             )
                           ],
@@ -943,7 +945,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   Text('Tổng tiền: ${currentTotal.toStringAsFixed(0)} VNĐ', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.teal)),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, minimumSize: const Size.fromHeight(40)),
-                    onPressed: currentTable.items.isNotEmpty ? _checkoutTable : null,
+                    onPressed: activeTable.items.isNotEmpty ? _checkoutTable : null,
                     icon: const Icon(Icons.payment),
                     label: const Text('Thanh Toán Đơn'),
                   )
