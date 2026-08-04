@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CreateOrderScreen extends StatefulWidget {
-  final String? existingOrderId; // Nếu null là tạo đơn mới
-
-  const CreateOrderScreen({Key? key, this.existingOrderId}) : super(key: key);
+  const CreateOrderScreen({Key? key}) : super(key: key);
 
   @override
   State<CreateOrderScreen> createState() => _CreateOrderScreenState();
@@ -12,6 +10,7 @@ class CreateOrderScreen extends StatefulWidget {
 
 class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final List<Map<String, dynamic>> _selectedItems = [];
+  String _selectedCategory = 'Tất cả';
 
   // Dialog chọn biến thể & đồ ăn thêm cho món được bấm
   void _showAddOptionDialog(Map<String, dynamic> menuItem) {
@@ -45,24 +44,24 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Biến thể
+                    // Biến thể / Size
                     if (variants.isNotEmpty) ...[
-                      const Text('Chọn Biến Thể:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('Biến thể / Size:', style: TextStyle(fontWeight: FontWeight.bold)),
                       ...variants.map((v) => RadioListTile<Map<String, dynamic>>(
-                            title: Text('${v['name']} (+${v['price']}k)'),
+                            title: Text('${v['name']} (+${v['price']} VNĐ)'),
                             value: v,
                             groupValue: selectedVariant,
                             onChanged: (val) => setDlgState(() => selectedVariant = val),
                           )),
                       const Divider(),
                     ],
-                    // Đồ ăn thêm
+                    // Topping / Đồ ăn thêm
                     if (addOns.isNotEmpty) ...[
-                      const Text('Đồ Ăn Thêm:', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('Topping / Đồ ăn thêm:', style: TextStyle(fontWeight: FontWeight.bold)),
                       ...addOns.map((a) {
                         final isChecked = selectedAddOns.contains(a);
                         return CheckboxListTile(
-                          title: Text('${a['name']} (+${a['price']}k)'),
+                          title: Text('${a['name']} (+${a['price']} VNĐ)'),
                           value: isChecked,
                           onChanged: (val) {
                             setDlgState(() {
@@ -144,7 +143,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
     final docRef = await FirebaseFirestore.instance.collection('orders').add(orderData);
 
-    // Ghi nhật ký thao tác
+    // Ghi nhật ký
     await FirebaseFirestore.instance.collection('logs').add({
       'action': 'Tạo đơn mới #${docRef.id.substring(0, 5)} - Giá trị: ${grandTotal.toStringAsFixed(0)} VNĐ',
       'createdAt': FieldValue.serverTimestamp(),
@@ -157,31 +156,75 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final categories = ['Tất cả', 'Món chính', 'Đồ uống', 'Ăn vặt', 'Topping', 'Tráng miệng', 'Khác'];
+
     return Scaffold(
       appBar: AppBar(title: const Text('Tạo Đơn Hàng Mới')),
       body: Column(
         children: [
-          // Danh sách món chọn
+          // Thanh lọc Danh mục
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: categories.map((cat) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6.0),
+                  child: FilterChip(
+                    label: Text(cat),
+                    selected: _selectedCategory == cat,
+                    onSelected: (selected) {
+                      setState(() {
+                        _selectedCategory = cat;
+                      });
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          
+          // Danh sách món ăn
           Expanded(
-            flex: 2,
+            flex: 3,
             child: StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('menu_items').snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                final docs = snapshot.data!.docs;
+                
+                var docs = snapshot.data!.docs;
+                if (_selectedCategory != 'Tất cả') {
+                  docs = docs.where((d) => (d.data() as Map<String, dynamic>)['category'] == _selectedCategory).toList();
+                }
+
+                if (docs.isEmpty) {
+                  return const Center(child: Text('Không có món ăn nào trong danh mục này.'));
+                }
 
                 return GridView.builder(
                   padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 2.5, crossAxisSpacing: 8, mainAxisSpacing: 8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2, childAspectRatio: 2.2, crossAxisSpacing: 8, mainAxisSpacing: 8
+                  ),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final item = docs[index].data() as Map<String, dynamic>;
+                    final name = item['name'] ?? '';
+                    final price = (item['price'] ?? 0).toDouble();
+
                     return InkWell(
                       onTap: () => _showAddOptionDialog(item),
                       child: Card(
                         color: Colors.orange.shade50,
-                        child: Center(
-                          child: Text(item['name'] ?? '', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(6.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(name, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1),
+                              Text('${price.toStringAsFixed(0)} VNĐ', style: const TextStyle(color: Colors.deepOrange, fontSize: 12)),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -191,9 +234,9 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ),
           ),
           const Divider(),
-          // Các món đã thêm vào đơn
+          // Các món đã chọn vào đơn
           Expanded(
-            flex: 3,
+            flex: 2,
             child: ListView.builder(
               itemCount: _selectedItems.length,
               itemBuilder: (context, index) {
@@ -202,6 +245,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 final addOnsStr = (item['addOns'] as List).isNotEmpty ? ' (+${(item['addOns'] as List).join(', ')})' : '';
 
                 return ListTile(
+                  dense: true,
                   title: Text('${item['name']}$variantStr$addOnsStr'),
                   subtitle: Text('SL: ${item['quantity']} ${item['unit']}'),
                   trailing: Text('${(item['totalPrice'] ?? 0).toStringAsFixed(0)} VNĐ'),
