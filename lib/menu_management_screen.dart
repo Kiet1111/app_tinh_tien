@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'topping_variant_dialog.dart';
 
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({Key? key}) : super(key: key);
@@ -19,7 +20,6 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     });
   }
 
-  // DIALOG QUẢN LÝ DANH MỤC
   void _showManageCategoriesDialog() {
     final newCatController = TextEditingController();
 
@@ -95,7 +95,6 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     );
   }
 
-  // FORM THÊM / SỬA MÓN ĂN
   void _openItemForm({DocumentSnapshot? doc}) {
     final isEdit = doc != null;
     final data = isEdit ? (doc.data() as Map<String, dynamic>) : {};
@@ -105,11 +104,17 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     final costPriceController = TextEditingController(text: data['costPrice']?.toString() ?? '0');
     String selectedCategory = data['category'] ?? 'Món chính';
     String selectedUnit = data['unit'] ?? 'Phần';
-    bool isAvailable = data['isAvailable'] ?? true; // Trạng thái Ẩn/Hiện
+    bool isAvailable = data['isAvailable'] ?? true;
     String imageUrl = data['imageUrl'] ?? '';
     File? imageFile;
 
-    List<Map<String, dynamic>> addOns = List<Map<String, dynamic>>.from(data['addOns'] ?? []);
+    List<Map<String, dynamic>> addOns = List<Map<String, dynamic>>.from(
+      (data['addOns'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map))
+    );
+    List<Map<String, dynamic>> variants = List<Map<String, dynamic>>.from(
+      (data['variants'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map))
+    );
+
     bool isLoading = false;
 
     showModalBottomSheet(
@@ -146,12 +151,13 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                 final itemData = {
                   'name': name,
                   'price': double.parse(priceText),
-                  'costPrice': double.tryParse(costText) ?? 0.0, // Giá vốn để tính lợi nhuận
+                  'costPrice': double.tryParse(costText) ?? 0.0,
                   'category': selectedCategory,
                   'unit': selectedUnit,
-                  'isAvailable': isAvailable, // Ẩn / Hiện món
+                  'isAvailable': isAvailable,
                   'imageUrl': imageUrl,
                   'addOns': addOns,
+                  'variants': variants,
                   'updatedAt': FieldValue.serverTimestamp(),
                 };
 
@@ -182,15 +188,16 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                     Center(child: Text(isEdit ? 'Sửa Món Ăn' : 'Thêm Món Ăn Mới', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
                     const SizedBox(height: 12),
                     
-                    // CÔNG TẮC ẨN / HIỆN MÓN HÀNG
                     Container(
                       decoration: BoxDecoration(
                         color: isAvailable ? Colors.green.shade50 : Colors.red.shade50,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: SwitchListTile(
-                        title: Text(isAvailable ? 'Món đang MỞ BÁN' : 'Món đang BỊ ẨN (Không hiện khi gọi món)', 
-                          style: TextStyle(fontWeight: FontWeight.bold, color: isAvailable ? Colors.green.shade900 : Colors.red.shade900)),
+                        title: Text(
+                          isAvailable ? 'Món đang MỞ BÁN' : 'Món đang BỊ ẨN', 
+                          style: TextStyle(fontWeight: FontWeight.bold, color: isAvailable ? Colors.green.shade900 : Colors.red.shade900),
+                        ),
                         subtitle: const Text('Bật/Tắt để ẩn món khỏi thực đơn bán hàng'),
                         value: isAvailable,
                         activeColor: Colors.green,
@@ -206,19 +213,20 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                         decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
                         child: imageFile != null
                             ? Image.file(imageFile!, fit: BoxFit.cover)
-                            : (imageUrl.isNotEmpty ? Image.network(imageUrl, fit: BoxFit.cover) : const Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo), Text('Chọn ảnh món')])),
+                            : (imageUrl.isNotEmpty
+                                ? Image.network(imageUrl, fit: BoxFit.cover)
+                                : const Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo), Text('Chọn ảnh món')])),
                       ),
                     ),
                     const SizedBox(height: 12),
                     TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Tên món ăn')),
                     const SizedBox(height: 12),
 
-                    // GIÁ BÁN & GIÁ VỐN
                     Row(
                       children: [
                         Expanded(child: TextField(controller: priceController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá Bán (VNĐ)'))),
                         const SizedBox(width: 8),
-                        Expanded(child: TextField(controller: costPriceController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá Vốn / Nhập (VNĐ)'))),
+                        Expanded(child: TextField(controller: costPriceController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá Vốn (VNĐ)'))),
                         const SizedBox(width: 8),
                         DropdownButton<String>(
                           value: ['Phần', 'Tô', 'Chai', 'Ly', 'kg', 'g', 'Đĩa'].contains(selectedUnit) ? selectedUnit : 'Phần',
@@ -229,7 +237,32 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                     ),
                     const SizedBox(height: 12),
 
-                    // DANH MỤC
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.tune, color: Colors.deepOrange),
+                      label: Text('Cấu hình Topping (${addOns.length}) & Biến thể (${variants.length})', style: const TextStyle(color: Colors.deepOrange)),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(42),
+                        side: const BorderSide(color: Colors.deepOrange),
+                      ),
+                      onPressed: () {
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          builder: (modalCtx) => ManageToppingVariantModal(
+                            initialToppings: addOns,
+                            initialVariants: variants,
+                            onSave: (newToppings, newVariants) {
+                              setModalState(() {
+                                addOns = newToppings;
+                                variants = newVariants;
+                              });
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -322,7 +355,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                         ),
                     ],
                   ),
-                  subtitle: Text('Bán: ${price.toStringAsFixed(0)}đ | Vốn: ${costPrice.toStringAsFixed(0)}đ / ${data['unit'] ?? 'Phần'}'),
+                  subtitle: Text('Bán: ${formatMoney(price)}đ | Vốn: ${formatMoney(costPrice)}đ / ${data['unit'] ?? 'Phần'}'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
