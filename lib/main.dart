@@ -182,7 +182,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     if (fs == null) return;
 
     fs.collection('menu').snapshots().listen((snapshot) {
-      if (mounted) {
+      if (mounted && snapshot.docs.isNotEmpty) {
         setState(() {
           menuItems = snapshot.docs.map((doc) => MenuItem.fromJson(doc.data())).toList();
         });
@@ -255,10 +255,43 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     });
   }
 
+  // LƯU VÀ ĐỒNG BỘ MÓN ÁN (ĐÃ CẢI TIẾN)
   Future<void> _saveMenuItemToCloud(MenuItem item) async {
+    // 1. Cập nhật ngay vào danh sách màn hình local
+    setState(() {
+      int index = menuItems.indexWhere((element) => element.id == item.id);
+      if (index != -1) {
+        menuItems[index] = item;
+      } else {
+        menuItems.add(item);
+      }
+    });
+
     final fs = _firestore;
-    if (fs == null) return;
-    await fs.collection('menu').doc(item.id).set(item.toJson());
+    if (fs == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã lưu tạm trên máy! (Chưa kết nối Firebase)')),
+        );
+      }
+      return;
+    }
+
+    try {
+      // 2. Đẩy dữ liệu lên Firebase
+      await fs.collection('menu').doc(item.id).set(item.toJson());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Lưu & Đồng bộ lên Firebase thành công!'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đã lưu trên máy. Lỗi đồng bộ Cloud: $e'), backgroundColor: Colors.orange),
+        );
+      }
+    }
   }
 
   Future<void> _syncTableToCloud(OrderTable table) async {
@@ -505,7 +538,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           ),
                   ),
                 ),
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Tên món chính')),
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Tên món chính (*)')),
                 TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá mặc định (VNĐ)')),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
@@ -561,21 +594,28 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Hủy')),
             ElevatedButton(
               onPressed: () {
-                if (nameCtrl.text.isNotEmpty) {
-                  MenuItem item = MenuItem(
-                    id: itemToEdit?.id ?? const Uuid().v4(),
-                    name: nameCtrl.text,
-                    basePrice: double.tryParse(priceCtrl.text) ?? 0,
-                    category: cat,
-                    unit: unit,
-                    imagePath: imagePath,
-                    isAvailable: isAvail,
-                    variants: currentVariants,
-                    toppings: currentToppings,
+                // Kiểm tra nếu tên món bị bỏ trống
+                if (nameCtrl.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Vui lòng nhập tên món ăn!'), backgroundColor: Colors.red),
                   );
-                  _saveMenuItemToCloud(item);
-                  Navigator.pop(ctx);
+                  return;
                 }
+
+                MenuItem item = MenuItem(
+                  id: itemToEdit?.id ?? const Uuid().v4(),
+                  name: nameCtrl.text.trim(),
+                  basePrice: double.tryParse(priceCtrl.text) ?? 0,
+                  category: cat,
+                  unit: unit,
+                  imagePath: imagePath,
+                  isAvailable: isAvail,
+                  variants: currentVariants,
+                  toppings: currentToppings,
+                );
+                
+                _saveMenuItemToCloud(item);
+                Navigator.pop(ctx);
               },
               child: const Text('Lưu & Đồng Bộ'),
             ),
@@ -812,7 +852,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       (sum, i) => sum + ((i['totalPrice'] as num?)?.toDouble() ?? 0.0)
     ) ?? 0.0;
 
-    // Gán ra biến cục bộ để ép kiểu Null Safety cho Closure
     final activeTable = currentTable;
 
     return Column(
@@ -1007,6 +1046,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
                               onPressed: () {
+                                setState(() {
+                                  menuItems.removeAt(i);
+                                });
                                 final fs = _firestore;
                                 if (fs != null) {
                                   fs.collection('menu').doc(item.id).delete();
@@ -1055,4 +1097,3 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 }
-
