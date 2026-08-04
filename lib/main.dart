@@ -8,11 +8,14 @@ import 'revenue_report_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Khởi tạo Firebase không chặn giao diện
   try {
     await Firebase.initializeApp();
   } catch (e) {
-    debugPrint("Lỗi khởi tạo Firebase: $e");
+    debugPrint("Chưa cấu hình Firebase hoặc lỗi kết nối: $e");
   }
+  
   runApp(const MyApp());
 }
 
@@ -54,16 +57,17 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
+      body: _screens[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
         selectedItemColor: Colors.deepOrange,
         unselectedItemColor: Colors.grey,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.table_restaurant), label: 'Sơ đồ'),
           BottomNavigationBarItem(icon: Icon(Icons.add_box), label: 'Thêm món'),
