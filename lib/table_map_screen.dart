@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'create_order_screen.dart';
+import 'order_detail_screen.dart';
 
 class TableMapScreen extends StatelessWidget {
   const TableMapScreen({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // Tạo danh sách 12 bàn mẫu
     final List<String> tables = List.generate(12, (index) => 'Bàn ${index + 1}');
 
     return Scaffold(
@@ -16,7 +16,6 @@ class TableMapScreen extends StatelessWidget {
         centerTitle: true,
       ),
       body: StreamBuilder<QuerySnapshot>(
-        // Lắng nghe các hóa đơn đang phục vụ (chưa thanh toán)
         stream: FirebaseFirestore.instance
             .collection('orders')
             .where('status', isEqualTo: 'pending')
@@ -26,12 +25,13 @@ class TableMapScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          Set<String> occupiedTables = {};
+          // Lưu danh sách bàn có khách kèm theo ID đơn hàng
+          Map<String, String> occupiedTableOrders = {};
           if (snapshot.hasData) {
             for (var doc in snapshot.data!.docs) {
               final data = doc.data() as Map<String, dynamic>;
               if (data['tableName'] != null) {
-                occupiedTables.add(data['tableName']);
+                occupiedTableOrders[data['tableName']] = doc.id;
               }
             }
           }
@@ -47,16 +47,31 @@ class TableMapScreen extends StatelessWidget {
             itemCount: tables.length,
             itemBuilder: (context, index) {
               final tableName = tables[index];
-              final isOccupied = occupiedTables.contains(tableName);
+              final isOccupied = occupiedTableOrders.containsKey(tableName);
+              final orderId = occupiedTableOrders[tableName];
 
               return InkWell(
                 onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => CreateOrderScreen(tableName: tableName),
-                    ),
-                  );
+                  if (isOccupied && orderId != null) {
+                    // BÀN CÓ KHÁCH -> Mở Màn hình Chi tiết hóa đơn (Thanh toán, Gộp, Tách)
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => OrderDetailScreen(
+                          orderId: orderId,
+                          tableName: tableName,
+                        ),
+                      ),
+                    );
+                  } else {
+                    // BÀN TRỐNG -> Mở Màn hình Chọn món tạo hóa đơn
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => CreateOrderScreen(tableName: tableName),
+                      ),
+                    );
+                  }
                 },
                 child: Container(
                   decoration: BoxDecoration(
