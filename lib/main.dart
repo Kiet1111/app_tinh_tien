@@ -154,7 +154,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void _listenToFirestoreRealtime() {
-    // Menu
     _firestore.collection('menu').snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
@@ -163,7 +162,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       }
     });
 
-    // Tables
     _firestore.collection('tables').snapshots().listen((snapshot) {
       if (mounted) {
         var loadedTables = snapshot.docs.map((doc) => OrderTable.fromJson(doc.data())).toList();
@@ -180,7 +178,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       }
     });
 
-    // App Config (Categories & Units)
     _firestore.collection('config').doc('app_config').snapshots().listen((doc) {
       if (doc.exists && mounted) {
         var data = doc.data();
@@ -200,7 +197,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       }
     });
 
-    // Orders
     _firestore.collection('orders').orderBy('time', descending: true).snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
@@ -245,7 +241,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  // --- QUẢN LÝ BÀN ---
   void _showAddTableDialog() {
     final nameCtrl = TextEditingController(text: 'Bàn ${tables.length + 1}');
     showDialog(
@@ -266,7 +261,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 String id = const Uuid().v4();
                 OrderTable newTable = OrderTable(id: id, tableName: name, items: []);
                 await _syncTableToCloud(newTable);
-                Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
               }
             },
             child: const Text('Tạo Bàn'),
@@ -290,7 +285,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () async {
               await _firestore.collection('tables').doc(table.id).delete();
-              Navigator.pop(ctx);
+              if (ctx.mounted) Navigator.pop(ctx);
             },
             child: const Text('Xóa'),
           )
@@ -299,7 +294,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // --- QUẢN LÝ DANH MỤC & ĐƠN VỊ ---
   void _showManageCategoriesDialog() {
     final catCtrl = TextEditingController();
     showDialog(
@@ -435,7 +429,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // --- THÊM / SỬA MÓN ---
   void _showAddEditItemDialog({MenuItem? itemToEdit}) {
     final nameCtrl = TextEditingController(text: itemToEdit?.name ?? '');
     final priceCtrl = TextEditingController(text: itemToEdit?.basePrice.toString() ?? '');
@@ -549,7 +542,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // --- CHỌN MÓN VÀO GIỎ (CÓ Ô NHẬP KG & GRAM) ---
   void _showAddToCartDialog(MenuItem item) {
     double selectedQty = 1;
     final kgCtrl = TextEditingController(text: '0');
@@ -569,7 +561,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           double totalWeightGrams = (kgVal * 1000) + gramVal;
 
           double unitBasePrice = selectedVariant != null ? selectedVariant!.price : item.basePrice;
-          double totalToppingPrice = selectedToppings.fold(0, (sum, t) => sum + t.price);
+          double totalToppingPrice = selectedToppings.fold<double>(0.0, (sum, t) => sum + t.price);
           double singlePortionPrice = unitBasePrice + totalToppingPrice;
 
           double finalTotalPrice = 0;
@@ -700,7 +692,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     var table = tables[selectedTableIndex];
     if (table.items.isEmpty) return;
 
-    double total = table.items.fold(0, (sum, i) => sum + (i['totalPrice'] as double));
+    double total = table.items.fold<double>(
+      0.0, 
+      (sum, i) => sum + ((i['totalPrice'] as num?)?.toDouble() ?? 0.0)
+    );
     String orderId = const Uuid().v4().substring(0, 6);
 
     Map<String, dynamic> orderData = {
@@ -715,7 +710,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     table.items.clear();
     await _syncTableToCloud(table);
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Thanh toán thành công ${total.toStringAsFixed(0)} VNĐ')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Thanh toán thành công ${total.toStringAsFixed(0)} VNĐ')));
+    }
   }
 
   @override
@@ -757,7 +754,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   Widget _buildSalesTab() {
     var currentTable = tables.isNotEmpty ? tables[selectedTableIndex] : null;
-    double currentTotal = currentTable?.items.fold(0, (sum, i) => sum + (i['totalPrice'] as double)) ?? 0;
+    
+    // Đã sửa lỗi ép kiểu Null Safety tại dòng này
+    double currentTotal = currentTable?.items.fold<double>(
+      0.0, 
+      (sum, i) => sum + ((i['totalPrice'] as num?)?.toDouble() ?? 0.0)
+    ) ?? 0.0;
 
     return Column(
       children: [
@@ -859,15 +861,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     itemCount: currentTable.items.length,
                     itemBuilder: (c, idx) {
                       final order = currentTable.items[idx];
+                      double itemTotal = (order['totalPrice'] as num? ?? 0).toDouble();
                       return ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text(order['name']),
+                        title: Text(order['name'] ?? ''),
                         subtitle: Text("Số lượng: ${order['quantity']} ${order['unit']}"),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text('${(order['totalPrice'] as double).toStringAsFixed(0)} VNĐ', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text('${itemTotal.toStringAsFixed(0)} VNĐ', style: const TextStyle(fontWeight: FontWeight.bold)),
                             IconButton(
                               icon: const Icon(Icons.remove_circle, color: Colors.red, size: 18),
                               onPressed: () {
@@ -991,3 +994,4 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 }
+
