@@ -19,7 +19,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     });
   }
 
-  // DIALOG QUẢN LÝ DANH MỤC (THÊM / SỬA / XÓA)
+  // DIALOG QUẢN LÝ DANH MỤC
   void _showManageCategoriesDialog() {
     final newCatController = TextEditingController();
 
@@ -37,55 +37,8 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                   'createdAt': FieldValue.serverTimestamp(),
                 });
                 newCatController.clear();
-                await _logAction('Thêm danh mục mới: $name');
+                await _logAction('Thêm danh mục: $name');
               }
-            }
-
-            void editCategory(String id, String oldName) {
-              final editController = TextEditingController(text: oldName);
-              showDialog(
-                context: context,
-                builder: (dCtx) => AlertDialog(
-                  title: const Text('Sửa tên danh mục'),
-                  content: TextField(controller: editController, decoration: const InputDecoration(labelText: 'Tên danh mục')),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Hủy')),
-                    ElevatedButton(
-                      onPressed: () async {
-                        final newName = editController.text.trim();
-                        if (newName.isNotEmpty) {
-                          await FirebaseFirestore.instance.collection('categories').doc(id).update({'name': newName});
-                          await _logAction('Sửa danh mục: $oldName -> $newName');
-                          if (mounted) Navigator.pop(dCtx);
-                        }
-                      },
-                      child: const Text('Lưu'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            void deleteCategory(String id, String name) {
-              showDialog(
-                context: context,
-                builder: (dCtx) => AlertDialog(
-                  title: const Text('Xác nhận xóa danh mục'),
-                  content: Text('Xóa danh mục "$name" sẽ không xóa các món thuộc danh mục này.'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Hủy')),
-                    ElevatedButton(
-                      onPressed: () async {
-                        await FirebaseFirestore.instance.collection('categories').doc(id).delete();
-                        await _logAction('Xóa danh mục: $name');
-                        if (mounted) Navigator.pop(dCtx);
-                      },
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                      child: const Text('Xóa', style: TextStyle(color: Colors.white)),
-                    ),
-                  ],
-                ),
-              );
             }
 
             return Container(
@@ -101,7 +54,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                       Expanded(
                         child: TextField(
                           controller: newCatController,
-                          decoration: const InputDecoration(labelText: 'Tên danh mục mới (VD: Lẩu, Đồ nướng...)', isDense: true),
+                          decoration: const InputDecoration(labelText: 'Tên danh mục mới', isDense: true),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -115,21 +68,17 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                         final docs = snapshot.data!.docs;
-                        if (docs.isEmpty) return const Center(child: Text('Chưa có danh mục tùy chỉnh nào.'));
-
                         return ListView.builder(
                           itemCount: docs.length,
                           itemBuilder: (context, index) {
                             final doc = docs[index];
-                            final catName = doc['name'] ?? '';
                             return ListTile(
-                              title: Text(catName),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () => editCategory(doc.id, catName)),
-                                  IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => deleteCategory(doc.id, catName)),
-                                ],
+                              title: Text(doc['name'] ?? ''),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () async {
+                                  await FirebaseFirestore.instance.collection('categories').doc(doc.id).delete();
+                                },
                               ),
                             );
                           },
@@ -153,12 +102,13 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
     final nameController = TextEditingController(text: data['name'] ?? '');
     final priceController = TextEditingController(text: data['price']?.toString() ?? '');
+    final costPriceController = TextEditingController(text: data['costPrice']?.toString() ?? '0');
     String selectedCategory = data['category'] ?? 'Món chính';
     String selectedUnit = data['unit'] ?? 'Phần';
+    bool isAvailable = data['isAvailable'] ?? true; // Trạng thái Ẩn/Hiện
     String imageUrl = data['imageUrl'] ?? '';
     File? imageFile;
 
-    List<Map<String, dynamic>> variants = List<Map<String, dynamic>>.from(data['variants'] ?? []);
     List<Map<String, dynamic>> addOns = List<Map<String, dynamic>>.from(data['addOns'] ?? []);
     bool isLoading = false;
 
@@ -174,41 +124,11 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
               if (picked != null) setModalState(() => imageFile = File(picked.path));
             }
 
-            void showAddToppingDialog() {
-              final topName = TextEditingController();
-              final topPrice = TextEditingController();
-              showDialog(
-                context: context,
-                builder: (dCtx) => AlertDialog(
-                  title: const Text('Thêm Topping'),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(controller: topName, decoration: const InputDecoration(labelText: 'Tên Topping')),
-                      TextField(controller: topPrice, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá thêm (VNĐ)')),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Hủy')),
-                    ElevatedButton(
-                      onPressed: () {
-                        if (topName.text.isNotEmpty) {
-                          setModalState(() {
-                            addOns.add({'name': topName.text.trim(), 'price': double.tryParse(topPrice.text.trim()) ?? 0});
-                          });
-                          Navigator.pop(dCtx);
-                        }
-                      },
-                      child: const Text('Thêm'),
-                    ),
-                  ],
-                ),
-              );
-            }
-
             Future<void> saveItem() async {
               final name = nameController.text.trim();
               final priceText = priceController.text.trim();
+              final costText = costPriceController.text.trim();
+
               if (name.isEmpty || priceText.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng điền đủ tên và giá!')));
                 return;
@@ -226,10 +146,11 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                 final itemData = {
                   'name': name,
                   'price': double.parse(priceText),
+                  'costPrice': double.tryParse(costText) ?? 0.0, // Giá vốn để tính lợi nhuận
                   'category': selectedCategory,
                   'unit': selectedUnit,
+                  'isAvailable': isAvailable, // Ẩn / Hiện món
                   'imageUrl': imageUrl,
-                  'variants': variants,
                   'addOns': addOns,
                   'updatedAt': FieldValue.serverTimestamp(),
                 };
@@ -252,7 +173,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
             }
 
             return Container(
-              height: MediaQuery.of(context).size.height * 0.88,
+              height: MediaQuery.of(context).size.height * 0.9,
               padding: const EdgeInsets.all(16),
               child: SingleChildScrollView(
                 child: Column(
@@ -260,10 +181,28 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                   children: [
                     Center(child: Text(isEdit ? 'Sửa Món Ăn' : 'Thêm Món Ăn Mới', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
                     const SizedBox(height: 12),
+                    
+                    // CÔNG TẮC ẨN / HIỆN MÓN HÀNG
+                    Container(
+                      decoration: BoxDecoration(
+                        color: isAvailable ? Colors.green.shade50 : Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SwitchListTile(
+                        title: Text(isAvailable ? 'Món đang MỞ BÁN' : 'Món đang BỊ ẨN (Không hiện khi gọi món)', 
+                          style: TextStyle(fontWeight: FontWeight.bold, color: isAvailable ? Colors.green.shade900 : Colors.red.shade900)),
+                        subtitle: const Text('Bật/Tắt để ẩn món khỏi thực đơn bán hàng'),
+                        value: isAvailable,
+                        activeColor: Colors.green,
+                        onChanged: (val) => setModalState(() => isAvailable = val),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
                     GestureDetector(
                       onTap: pickImage,
                       child: Container(
-                        height: 90, width: double.infinity,
+                        height: 80, width: double.infinity,
                         decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(8)),
                         child: imageFile != null
                             ? Image.file(imageFile!, fit: BoxFit.cover)
@@ -274,16 +213,28 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                     TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Tên món ăn')),
                     const SizedBox(height: 12),
 
-                    // CHỌN DANH MỤC TỪ FIRESTORE
+                    // GIÁ BÁN & GIÁ VỐN
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: priceController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá Bán (VNĐ)'))),
+                        const SizedBox(width: 8),
+                        Expanded(child: TextField(controller: costPriceController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá Vốn / Nhập (VNĐ)'))),
+                        const SizedBox(width: 8),
+                        DropdownButton<String>(
+                          value: ['Phần', 'Tô', 'Chai', 'Ly', 'kg', 'g', 'Đĩa'].contains(selectedUnit) ? selectedUnit : 'Phần',
+                          items: ['Phần', 'Tô', 'Chai', 'Ly', 'kg', 'g', 'Đĩa'].map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
+                          onChanged: (val) => setModalState(() => selectedUnit = val!),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // DANH MỤC
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Danh mục:', style: TextStyle(fontWeight: FontWeight.bold)),
-                        TextButton.icon(
-                          onPressed: _showManageCategoriesDialog,
-                          icon: const Icon(Icons.settings, size: 18),
-                          label: const Text('Quản lý danh mục'),
-                        ),
+                        TextButton.icon(onPressed: _showManageCategoriesDialog, icon: const Icon(Icons.settings, size: 16), label: const Text('Quản lý danh mục')),
                       ],
                     ),
                     StreamBuilder<QuerySnapshot>(
@@ -291,9 +242,7 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                       builder: (context, snapshot) {
                         List<String> categoryList = ['Món chính', 'Đồ uống', 'Ăn vặt', 'Topping', 'Tráng miệng', 'Khác'];
                         if (snapshot.hasData) {
-                          for (var d in snapshot.data!.docs) {
-                            categoryList.add(d['name']);
-                          }
+                          for (var d in snapshot.data!.docs) { categoryList.add(d['name']); }
                         }
                         categoryList = categoryList.toSet().toList();
                         if (!categoryList.contains(selectedCategory)) selectedCategory = categoryList.first;
@@ -304,41 +253,12 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
                             return ChoiceChip(
                               label: Text(cat),
                               selected: selectedCategory == cat,
-                              onSelected: (sel) {
-                                if (sel) setModalState(() => selectedCategory = cat);
-                              },
+                              onSelected: (sel) { if (sel) setModalState(() => selectedCategory = cat); },
                             );
                           }).toList(),
                         );
                       },
                     ),
-
-                    Row(
-                      children: [
-                        Expanded(child: TextField(controller: priceController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Giá bán chuẩn (VNĐ)'))),
-                        const SizedBox(width: 12),
-                        DropdownButton<String>(
-                          value: ['Phần', 'Tô', 'Chai', 'Ly', 'kg', 'g', 'Đĩa'].contains(selectedUnit) ? selectedUnit : 'Phần',
-                          items: ['Phần', 'Tô', 'Chai', 'Ly', 'kg', 'g', 'Đĩa'].map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(),
-                          onChanged: (val) => setModalState(() => selectedUnit = val!),
-                        ),
-                      ],
-                    ),
-
-                    const Divider(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Topping / Món thêm:', style: TextStyle(fontWeight: FontWeight.bold)),
-                        TextButton.icon(onPressed: showAddToppingDialog, icon: const Icon(Icons.add), label: const Text('Thêm Topping')),
-                      ],
-                    ),
-                    ...addOns.asMap().entries.map((e) => ListTile(
-                          dense: true,
-                          title: Text(e.value['name']),
-                          subtitle: Text('+${e.value['price']} VNĐ'),
-                          trailing: IconButton(icon: const Icon(Icons.remove_circle, color: Colors.red), onPressed: () => setModalState(() => addOns.removeAt(e.key))),
-                        )),
 
                     const SizedBox(height: 16),
                     isLoading
@@ -362,9 +282,9 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Quản Lý Món Ăn & Danh Mục'),
+        title: const Text('Quản Lý Món Ăn & Giá Vốn'),
         actions: [
-          IconButton(icon: const Icon(Icons.category), tooltip: 'Quản lý danh mục', onPressed: _showManageCategoriesDialog),
+          IconButton(icon: const Icon(Icons.category), tooltip: 'Danh mục', onPressed: _showManageCategoriesDialog),
         ],
       ),
       floatingActionButton: FloatingActionButton(onPressed: () => _openItemForm(), child: const Icon(Icons.add)),
@@ -380,14 +300,29 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
             itemBuilder: (context, index) {
               final doc = docs[index];
               final data = doc.data() as Map<String, dynamic>;
+              final bool isAvailable = data['isAvailable'] ?? true;
+              final double price = (data['price'] ?? 0).toDouble();
+              final double costPrice = (data['costPrice'] ?? 0).toDouble();
+
               return Card(
+                color: isAvailable ? Colors.white : Colors.grey.shade200,
                 margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 child: ListTile(
                   leading: data['imageUrl'] != null && data['imageUrl'].toString().isNotEmpty
                       ? Image.network(data['imageUrl'], width: 45, height: 45, fit: BoxFit.cover)
                       : const Icon(Icons.fastfood, color: Colors.orange),
-                  title: Text(data['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('[${data['category'] ?? 'Món chính'}] ${data['price']} VNĐ / ${data['unit'] ?? 'Phần'}'),
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(data['name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, decoration: isAvailable ? null : TextDecoration.lineThrough))),
+                      if (!isAvailable)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)),
+                          child: const Text('ĐÃ ẨN', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                        ),
+                    ],
+                  ),
+                  subtitle: Text('Bán: ${price.toStringAsFixed(0)}đ | Vốn: ${costPrice.toStringAsFixed(0)}đ / ${data['unit'] ?? 'Phần'}'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
