@@ -7,6 +7,24 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Tránh màn hình xám khi có lỗi giao diện trong Release mode
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      child: Container(
+        color: Colors.white,
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: Text(
+            'Lỗi giao diện: ${details.exception}',
+            style: const TextStyle(color: Colors.red, fontSize: 14),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  };
+
   try {
     await Firebase.initializeApp();
   } catch (e) {
@@ -145,7 +163,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   List<Map<String, dynamic>> orderHistory = [];
   final ImagePicker _picker = ImagePicker();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  FirebaseFirestore? get _firestore {
+    try {
+      return FirebaseFirestore.instance;
+    } catch (_) {
+      return null;
+    }
+  }
 
   @override
   void initState() {
@@ -154,15 +179,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void _listenToFirestoreRealtime() {
-    _firestore.collection('menu').snapshots().listen((snapshot) {
+    final fs = _firestore;
+    if (fs == null) return;
+
+    fs.collection('menu').snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
           menuItems = snapshot.docs.map((doc) => MenuItem.fromJson(doc.data())).toList();
         });
       }
-    });
+    }, onError: (e) => debugPrint("Menu Stream Error: $e"));
 
-    _firestore.collection('tables').snapshots().listen((snapshot) {
+    fs.collection('tables').snapshots().listen((snapshot) {
       if (mounted) {
         var loadedTables = snapshot.docs.map((doc) => OrderTable.fromJson(doc.data())).toList();
         if (loadedTables.isEmpty) {
@@ -176,9 +204,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           });
         }
       }
-    });
+    }, onError: (e) => debugPrint("Tables Stream Error: $e"));
 
-    _firestore.collection('config').doc('app_config').snapshots().listen((doc) {
+    fs.collection('config').doc('app_config').snapshots().listen((doc) {
       if (doc.exists && mounted) {
         var data = doc.data();
         if (data != null) {
@@ -195,21 +223,23 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       } else if (!doc.exists) {
         _saveConfigToCloud();
       }
-    });
+    }, onError: (e) => debugPrint("Config Stream Error: $e"));
 
-    _firestore.collection('orders').orderBy('time', descending: true).snapshots().listen((snapshot) {
+    fs.collection('orders').orderBy('time', descending: true).snapshots().listen((snapshot) {
       if (mounted) {
         setState(() {
           orderHistory = snapshot.docs.map((doc) => doc.data()).toList();
         });
       }
-    });
+    }, onError: (e) => debugPrint("Orders Stream Error: $e"));
   }
 
   Future<void> _initDefaultTables() async {
+    final fs = _firestore;
+    if (fs == null) return;
     for (int i = 1; i <= 6; i++) {
       String id = 'table_$i';
-      await _firestore.collection('tables').doc(id).set({
+      await fs.collection('tables').doc(id).set({
         'id': id,
         'tableName': 'Bàn $i',
         'items': [],
@@ -218,18 +248,24 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   Future<void> _saveConfigToCloud() async {
-    await _firestore.collection('config').doc('app_config').set({
+    final fs = _firestore;
+    if (fs == null) return;
+    await fs.collection('config').doc('app_config').set({
       'categories': categories,
       'units': units,
     });
   }
 
   Future<void> _saveMenuItemToCloud(MenuItem item) async {
-    await _firestore.collection('menu').doc(item.id).set(item.toJson());
+    final fs = _firestore;
+    if (fs == null) return;
+    await fs.collection('menu').doc(item.id).set(item.toJson());
   }
 
   Future<void> _syncTableToCloud(OrderTable table) async {
-    await _firestore.collection('tables').doc(table.id).set(table.toJson());
+    final fs = _firestore;
+    if (fs == null) return;
+    await fs.collection('tables').doc(table.id).set(table.toJson());
   }
 
   Future<String?> _pickImage() async {
@@ -273,7 +309,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   void _deleteCurrentTable() {
     if (tables.isEmpty) return;
-    var table = tables[selectedTableIndex];
+    int safeIndex = selectedTableIndex.clamp(0, tables.length - 1);
+    var table = tables[safeIndex];
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -284,7 +321,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
             onPressed: () async {
-              await _firestore.collection('tables').doc(table.id).delete();
+              final fs = _firestore;
+              if (fs != null) {
+                await fs.collection('tables').doc(table.id).delete();
+              }
               if (ctx.mounted) Navigator.pop(ctx);
             },
             child: const Text('Xóa'),
@@ -459,7 +499,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     color: Colors.grey.shade200,
                     child: imagePath == null
                         ? const Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_a_photo), Text('Chọn ảnh minh họa')])
-                        : Image.file(File(imagePath!), fit: BoxFit.cover),
+                        : Image.file(
+                            File(imagePath!), 
+                            fit: BoxFit.cover,
+                            errorBuilder: (c, e, s) => const Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.broken_image), Text('Ảnh không hợp lệ')]),
+                          ),
                   ),
                 ),
                 TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Tên món chính')),
@@ -662,12 +706,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
                 onPressed: () {
                   if (tables.isEmpty) return;
+                  int safeIndex = selectedTableIndex.clamp(0, tables.length - 1);
                   String fullName = selectedVariant != null ? selectedVariant!.name : item.name;
                   if (selectedToppings.isNotEmpty) {
                     fullName += " (${selectedToppings.map((t) => t.name).join(', ')})";
                   }
 
-                  tables[selectedTableIndex].items.add({
+                  tables[safeIndex].items.add({
                     'itemId': item.id,
                     'name': fullName,
                     'unit': item.unit,
@@ -675,7 +720,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     'totalPrice': finalTotalPrice,
                   });
 
-                  _syncTableToCloud(tables[selectedTableIndex]);
+                  _syncTableToCloud(tables[safeIndex]);
                   Navigator.pop(ctx);
                 },
                 child: Text('Thêm • ${finalTotalPrice.toStringAsFixed(0)} VNĐ'),
@@ -689,7 +734,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   void _checkoutTable() async {
     if (tables.isEmpty) return;
-    var table = tables[selectedTableIndex];
+    int safeIndex = selectedTableIndex.clamp(0, tables.length - 1);
+    var table = tables[safeIndex];
     if (table.items.isEmpty) return;
 
     double total = table.items.fold<double>(
@@ -706,7 +752,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       'items': List.from(table.items),
     };
 
-    await _firestore.collection('orders').doc(orderId).set(orderData);
+    final fs = _firestore;
+    if (fs != null) {
+      await fs.collection('orders').doc(orderId).set(orderData);
+    }
     table.items.clear();
     await _syncTableToCloud(table);
 
@@ -753,9 +802,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   Widget _buildSalesTab() {
-    var currentTable = tables.isNotEmpty ? tables[selectedTableIndex] : null;
-    
-    // Đã sửa lỗi ép kiểu Null Safety tại dòng này
+    OrderTable? currentTable;
+    if (tables.isNotEmpty) {
+      int safeIndex = selectedTableIndex.clamp(0, tables.length - 1);
+      currentTable = tables[safeIndex];
+    }
+
     double currentTotal = currentTable?.items.fold<double>(
       0.0, 
       (sum, i) => sum + ((i['totalPrice'] as num?)?.toDouble() ?? 0.0)
@@ -823,7 +875,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     children: [
                       Expanded(
                         child: item.imagePath != null
-                            ? Image.file(File(item.imagePath!), fit: BoxFit.cover)
+                            ? Image.file(
+                                File(item.imagePath!), 
+                                fit: BoxFit.cover,
+                                errorBuilder: (c, e, s) => const Icon(Icons.fastfood, size: 40, color: Colors.teal),
+                              )
                             : const Icon(Icons.fastfood, size: 40, color: Colors.teal),
                       ),
                       Text(item.name, style: TextStyle(fontWeight: FontWeight.bold, decoration: item.isAvailable ? null : TextDecoration.lineThrough)),
@@ -874,7 +930,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             IconButton(
                               icon: const Icon(Icons.remove_circle, color: Colors.red, size: 18),
                               onPressed: () {
-                                currentTable.items.removeAt(idx);
+                                currentTable!.items.removeAt(idx);
                                 _syncTableToCloud(currentTable);
                               },
                             )
@@ -949,7 +1005,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
                               onPressed: () {
-                                _firestore.collection('menu').doc(item.id).delete();
+                                final fs = _firestore;
+                                if (fs != null) {
+                                  fs.collection('menu').doc(item.id).delete();
+                                }
                               },
                             ),
                           ],
