@@ -9,13 +9,21 @@ import 'revenue_report_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Khởi tạo Firebase không chặn giao diện
+  // Khởi tạo Firebase trực tiếp bằng cấu hình chính xác từ dự án của bạn
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: const FirebaseOptions(
+        apiKey: "AIzaSyDOD0ChXgfnUmFcFWG4IoYA7NL-pVGd5pY",
+        appId: "1:762842766866:android:a6f619e711641c61b882cb",
+        messagingSenderId: "762842766866",
+        projectId: "app-tinh-tien-65657",
+        storageBucket: "app-tinh-tien-65657.firebasestorage.app",
+      ),
+    );
   } catch (e) {
-    debugPrint("Chưa cấu hình Firebase hoặc lỗi kết nối: $e");
+    debugPrint("Lỗi kết nối Firebase: $e");
   }
-  
+
   runApp(const MyApp());
 }
 
