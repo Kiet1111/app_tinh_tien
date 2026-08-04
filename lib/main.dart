@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'table_map_screen.dart';
 import 'add_menu_item_screen.dart';
+import 'menu_management_screen.dart';
+import 'revenue_report_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +41,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   final List<Widget> _screens = [
     const TableMapScreen(),
     const AddMenuItemScreen(),
+    const MenuManagementScreen(),
+    const RevenueReportScreen(),
   ];
 
   @override
@@ -47,6 +51,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       body: _screens[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: Colors.deepOrange,
+        unselectedItemColor: Colors.grey,
         onTap: (index) {
           setState(() {
             _currentIndex = index;
@@ -58,8 +65,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             label: 'Sơ đồ bàn',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.restaurant_menu),
+            icon: Icon(Icons.add_box),
             label: 'Thêm món',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.edit_note),
+            label: 'Quản lý món',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bar_chart),
+            label: 'Doanh thu',
           ),
         ],
       ),
