@@ -12,15 +12,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
   final List<Map<String, dynamic>> _selectedItems = [];
   String _selectedCategory = 'Tất cả';
 
-  // DIALOG THÊM MÓN VÀO ĐƠN - HỖ TRỢ NHẬP SỐ KG / GRAM CHI TIẾT
   void _showAddOptionDialog(Map<String, dynamic> menuItem) {
     final List addOns = menuItem['addOns'] ?? [];
     final String unit = (menuItem['unit'] ?? 'Phần').toString().toLowerCase();
     final bool isWeightUnit = (unit == 'kg' || unit == 'g');
 
-    // Mặc định trọng lượng/số lượng
     final quantityController = TextEditingController(text: '1');
-    String weightUnitType = (unit == 'g') ? 'g' : 'kg'; // Đơn vị nhập 'kg' hoặc 'g'
+    String weightUnitType = (unit == 'g') ? 'g' : 'kg';
     List<Map<String, dynamic>> selectedAddOns = [];
 
     showDialog(
@@ -34,23 +32,30 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
 
               double itemTotal = 0;
               if (isWeightUnit) {
-                // Đổi ra kg để tính giá
                 double weightInKg = (weightUnitType == 'g') ? (inputVal / 1000.0) : inputVal;
                 itemTotal = basePrice * weightInKg;
               } else {
                 itemTotal = basePrice * inputVal;
               }
 
-              // Cộng giá Topping
               for (var addon in selectedAddOns) {
                 itemTotal += (addon['price'] ?? 0).toDouble();
               }
-
               return itemTotal;
             }
 
+            double calculateTotalCost() {
+              double inputVal = double.tryParse(quantityController.text.trim()) ?? 0.0;
+              double baseCost = (menuItem['costPrice'] ?? 0).toDouble();
+              if (isWeightUnit) {
+                double weightInKg = (weightUnitType == 'g') ? (inputVal / 1000.0) : inputVal;
+                return baseCost * weightInKg;
+              }
+              return baseCost * inputVal;
+            }
+
             return AlertDialog(
-              title: Text('Chọn món: ${menuItem['name']}'),
+              title: Text('Chọn: ${menuItem['name']}'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -58,42 +63,27 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                   children: [
                     Text('Đơn giá: ${menuItem['price']} VNĐ / ${menuItem['unit']}', style: const TextStyle(color: Colors.grey)),
                     const SizedBox(height: 12),
-
-                    // NHẬP TRỌNG LƯỢNG KHI MÓN CÓ ĐƠN VỊ KG / G
                     if (isWeightUnit) ...[
-                      const Text('Nhập trọng lượng mua:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
                       Row(
                         children: [
                           Expanded(
                             child: TextField(
                               controller: quantityController,
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(
-                                labelText: 'Số lượng (${weightUnitType})',
-                                border: const OutlineInputBorder(),
-                                hintText: weightUnitType == 'kg' ? 'VD: 0.5 hoặc 1.2' : 'VD: 250 hoặc 500',
-                              ),
+                              decoration: InputDecoration(labelText: 'Số lượng ($weightUnitType)', border: const OutlineInputBorder()),
                               onChanged: (_) => setDlgState(() {}),
                             ),
                           ),
                           const SizedBox(width: 8),
                           DropdownButton<String>(
                             value: weightUnitType,
-                            items: const [
-                              DropdownMenuItem(value: 'kg', child: Text('kg')),
-                              DropdownMenuItem(value: 'g', child: Text('g (gram)')),
-                            ],
-                            onChanged: (val) {
-                              if (val != null) setDlgState(() => weightUnitType = val);
-                            },
+                            items: const [DropdownMenuItem(value: 'kg', child: Text('kg')), DropdownMenuItem(value: 'g', child: Text('g'))],
+                            onChanged: (val) { if (val != null) setDlgState(() => weightUnitType = val); },
                           ),
                         ],
                       ),
                     ] else ...[
-                      // NHẬP SỐ LƯỢNG CHO ĐƠN VỊ PHẦN/LY/TÔ...
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           const Text('Số lượng:', style: TextStyle(fontWeight: FontWeight.bold)),
                           Expanded(
@@ -111,9 +101,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         ],
                       ),
                     ],
-
                     const Divider(height: 24),
-                    // CHỌN TOPPING
                     if (addOns.isNotEmpty) ...[
                       const Text('Topping / Đồ ăn thêm:', style: TextStyle(fontWeight: FontWeight.bold)),
                       ...addOns.map((a) {
@@ -140,7 +128,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     double inputVal = double.tryParse(quantityController.text.trim()) ?? 0.0;
                     if (inputVal <= 0) return;
 
-                    final calculatedPrice = calculateTotal();
                     final quantityDisplay = isWeightUnit ? '$inputVal $weightUnitType' : '${inputVal.toInt()} ${menuItem['unit']}';
 
                     setState(() {
@@ -148,7 +135,8 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                         'name': menuItem['name'],
                         'quantityDisplay': quantityDisplay,
                         'addOns': selectedAddOns.map((a) => a['name']).toList(),
-                        'totalPrice': calculatedPrice,
+                        'totalPrice': calculateTotal(),
+                        'totalCost': calculateTotalCost(), // Lưu tổng giá vốn để tính lợi nhuận
                       });
                     });
                     Navigator.pop(ctx);
@@ -167,25 +155,22 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
     if (_selectedItems.isEmpty) return;
 
     double grandTotal = 0;
+    double grandCost = 0;
     for (var item in _selectedItems) {
       grandTotal += (item['totalPrice'] ?? 0).toDouble();
+      grandCost += (item['totalCost'] ?? 0).toDouble();
     }
 
     final orderData = {
       'items': _selectedItems,
       'totalAmount': grandTotal,
-      'status': 'pending',
+      'totalCostAmount': grandCost, // Tổng giá vốn của đơn hàng
+      'status': 'completed',
       'createdAt': FieldValue.serverTimestamp(),
       'dateString': DateTime.now().toIso8601String().substring(0, 10),
     };
 
-    final docRef = await FirebaseFirestore.instance.collection('orders').add(orderData);
-
-    await FirebaseFirestore.instance.collection('logs').add({
-      'action': 'Tạo đơn mới #${docRef.id.substring(0, 5)} - Tổng: ${grandTotal.toStringAsFixed(0)} VNĐ',
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
+    await FirebaseFirestore.instance.collection('orders').add(orderData);
     if (mounted) Navigator.pop(context);
   }
 
@@ -195,15 +180,13 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       appBar: AppBar(title: const Text('Tạo Đơn Hàng Mới')),
       body: Column(
         children: [
-          // DANH MỤC LỌC ĐỘNG TỪ FIRESTORE
+          // DANH MỤC LỌC
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('categories').snapshots(),
             builder: (context, snapshot) {
               List<String> categories = ['Tất cả', 'Món chính', 'Đồ uống', 'Ăn vặt', 'Topping', 'Tráng miệng', 'Khác'];
               if (snapshot.hasData) {
-                for (var d in snapshot.data!.docs) {
-                  categories.add(d['name']);
-                }
+                for (var d in snapshot.data!.docs) { categories.add(d['name']); }
               }
               categories = categories.toSet().toList();
 
@@ -226,7 +209,7 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             },
           ),
 
-          // DANH SÁCH MÓN ĂN
+          // DANH SÁCH MÓN ĂN (ĐÃ LỌC BỎ CÁC MÓN BỊ ẨN)
           Expanded(
             flex: 3,
             child: StreamBuilder<QuerySnapshot>(
@@ -235,11 +218,19 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
                 var docs = snapshot.data!.docs;
+
+                // LỌC 1: BỎ CÁC MÓN BỊ ẨN (isAvailable == false)
+                docs = docs.where((d) {
+                  final data = d.data() as Map<String, dynamic>;
+                  return data['isAvailable'] ?? true;
+                }).toList();
+
+                // LỌC 2: THEO DANH MỤC
                 if (_selectedCategory != 'Tất cả') {
                   docs = docs.where((d) => (d.data() as Map<String, dynamic>)['category'] == _selectedCategory).toList();
                 }
 
-                if (docs.isEmpty) return const Center(child: Text('Không tìm thấy món ăn trong danh mục này.'));
+                if (docs.isEmpty) return const Center(child: Text('Không có món ăn khả dụng.'));
 
                 return GridView.builder(
                   padding: const EdgeInsets.all(8),
@@ -270,19 +261,17 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
           const Divider(),
 
-          // MÓN ĐÃ CHỌN VÀO ĐƠN
+          // DANH SÁCH ĐÃ CHỌN
           Expanded(
             flex: 2,
             child: ListView.builder(
               itemCount: _selectedItems.length,
               itemBuilder: (context, index) {
                 final item = _selectedItems[index];
-                final addOnsStr = (item['addOns'] as List).isNotEmpty ? ' (+${(item['addOns'] as List).join(', ')})' : '';
-
                 return ListTile(
                   dense: true,
-                  title: Text('${item['name']}$addOnsStr'),
-                  subtitle: Text('Trọng lượng / SL: ${item['quantityDisplay']}'),
+                  title: Text(item['name']),
+                  subtitle: Text('SL: ${item['quantityDisplay']}'),
                   trailing: Text('${(item['totalPrice'] ?? 0).toStringAsFixed(0)} VNĐ', style: const TextStyle(fontWeight: FontWeight.bold)),
                   leading: IconButton(
                     icon: const Icon(Icons.remove_circle, color: Colors.red),
