@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'table_map_screen.dart';
-import 'add_menu_item_screen.dart';
+import 'orders_screen.dart';
+import 'menu_management_screen.dart';
 import 'unit_management_screen.dart';
 import 'expense_screen.dart';
-import 'revenue_report_screen.dart';
+import 'history_report_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Khởi tạo Firebase trực tiếp bằng cấu hình chính xác từ dự án của bạn
   try {
     await Firebase.initializeApp(
       options: const FirebaseOptions(
@@ -55,11 +53,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
   final List<Widget> _screens = [
-    const TableMapScreen(),
-    const AddMenuItemScreen(),
+    const OrdersScreen(),
+    const MenuManagementScreen(),
     const UnitManagementScreen(),
     const ExpenseScreen(),
-    const RevenueReportScreen(),
+    const HistoryReportScreen(),
   ];
 
   @override
@@ -71,17 +69,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         type: BottomNavigationBarType.fixed,
         selectedItemColor: Colors.deepOrange,
         unselectedItemColor: Colors.grey,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onTap: (index) => setState(() => _currentIndex = index),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.table_restaurant), label: 'Sơ đồ'),
-          BottomNavigationBarItem(icon: Icon(Icons.add_box), label: 'Thêm món'),
+          BottomNavigationBarItem(icon: Icon(Icons.receipt_long), label: 'Đơn hàng'),
+          BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu), label: 'Món ăn'),
           BottomNavigationBarItem(icon: Icon(Icons.square_foot), label: 'Đơn vị'),
-          BottomNavigationBarItem(icon: Icon(Icons.receipt), label: 'Sổ chi'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Lợi nhuận'),
+          BottomNavigationBarItem(icon: Icon(Icons.money_off), label: 'Chi phí'),
+          BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'Lịch sử'),
         ],
       ),
     );
