@@ -42,7 +42,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
       appBar: AppBar(title: const Text('Tạo Đơn Hàng Mới'), centerTitle: true),
       body: Column(
         children: [
-          // BỘ LỌC DANH MỤC
           StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('categories').snapshots(),
             builder: (context, snapshot) {
@@ -73,7 +72,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             },
           ),
 
-          // DANH SÁCH MÓN ĂN
           Expanded(
             flex: 3,
             child: StreamBuilder<QuerySnapshot>(
@@ -103,7 +101,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
                     final item = docs[index].data() as Map<String, dynamic>;
                     return InkWell(
                       onTap: () {
-                        // HIỂN THỊ DIALOG CHỌN TOPPING & BIẾN THỂ
                         showDialog(
                           context: context,
                           builder: (ctx) => SelectToppingVariantDialog(
@@ -135,7 +132,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
           ),
           const Divider(),
 
-          // DANH SÁCH CÁC MÓN ĐÃ CHỌN TRONG ĐƠN
           Expanded(
             flex: 2,
             child: ListView.builder(
@@ -158,7 +154,6 @@ class _CreateOrderScreenState extends State<CreateOrderScreen> {
             ),
           ),
 
-          // NÚT HOÀN TẤT ĐƠN HÀNG
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: ElevatedButton(
